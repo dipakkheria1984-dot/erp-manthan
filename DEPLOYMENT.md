@@ -61,10 +61,14 @@ Production (and Preview, if you want previews to work):
 | `AUTH_SECRET` | from step 2 |
 | `JOB_SECRET` | from step 2 |
 | `CRON_SECRET` | from step 2 |
-| `TZ` | `Asia/Kolkata` |
 
 `BLOB_READ_WRITE_TOKEN` is added for you in the next step. Do **not** set
 `UPLOAD_DIR` — leaving it out is what keeps uploads on the blob store.
+
+There is no `TZ` here on purpose: Vercel reserves that name and rejects it.
+`src/instrumentation.ts` sets `Asia/Kolkata` at server start-up instead, so due
+dates and overdue counts stay on IST rather than the UTC the runtime defaults
+to.
 
 ## 6. Create the Blob store
 

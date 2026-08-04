@@ -228,7 +228,7 @@ step-by-step.
 | `JOB_SECRET` | yes | Guards `POST /api/jobs/*`. |
 | `CRON_SECRET` | on Vercel | Guards the `GET` that Vercel Cron issues. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | at seed time | The seed refuses the built-in default under `NODE_ENV=production`. |
-| `TZ` | yes | `Asia/Kolkata` — see below. |
+| `TZ` | no | `Asia/Kolkata`. Set automatically at start-up by `src/instrumentation.ts`; Vercel reserves the name, so it cannot be set there. |
 
 Then `npm run db:deploy` (against the **direct** connection string) and
 `npm run db:seed`.
@@ -251,7 +251,11 @@ Then `npm run db:deploy` (against the **direct** connection string) and
   it authenticates with `Authorization: Bearer $CRON_SECRET` rather than
   `x-job-secret`. `vercel.json` schedules it at `30 3 * * *` **UTC** — Vercel
   cron expressions are always UTC, and that is 09:00 IST.
-- **Set `TZ=Asia/Kolkata`.** Date arithmetic follows the process zone, so a
-  server on UTC puts due dates on the wrong side of midnight for five and a half
-  hours a day. `assertIstProcess()` warns at start-up when it is wrong.
+- **The time zone is set in code, not the environment.** Date arithmetic follows
+  the process zone, so a server on UTC puts due dates on the wrong side of
+  midnight for five and a half hours a day. Vercel reserves the variable name
+  `TZ` and rejects it, so `src/instrumentation.ts` assigns it at server
+  start-up instead — Node re-reads the zone on assignment. An explicit `TZ` in
+  the environment still wins on hosts that permit one, and
+  `assertIstProcess()` warns if neither took effect.
 - **Session cookies are `secure` in production**, so serve over HTTPS.
