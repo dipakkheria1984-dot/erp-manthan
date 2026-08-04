@@ -18,6 +18,26 @@ function optionalInt(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/**
+ * The Vercel Blob read-write token.
+ *
+ * A store connected under its own name gets a prefixed variable —
+ * `mydocuments_READ_WRITE_TOKEN` — rather than the documented
+ * `BLOB_READ_WRITE_TOKEN`, and the prefix depends on what the store was called.
+ * Falling back to any `*_READ_WRITE_TOKEN` keeps that naming choice from
+ * silently downgrading document storage to the local disk, where on a
+ * serverless host every upload is lost at the next deploy.
+ */
+function blobToken(): string {
+  const direct = process.env.BLOB_READ_WRITE_TOKEN;
+  if (direct) return direct;
+
+  for (const [name, value] of Object.entries(process.env)) {
+    if (name.endsWith("_READ_WRITE_TOKEN") && value) return value;
+  }
+  return "";
+}
+
 export const env = {
   databaseUrl: required("DATABASE_URL"),
   authSecret: required("AUTH_SECRET"),
@@ -31,7 +51,7 @@ export const env = {
   cronSecret: process.env.CRON_SECRET ?? "",
   // Set by the Vercel Blob integration. Its presence is what switches document
   // storage from the local disk to the blob store — see src/lib/storage.ts.
-  blobToken: process.env.BLOB_READ_WRITE_TOKEN ?? "",
+  blobToken: blobToken(),
   isProduction: process.env.NODE_ENV === "production",
 };
 
