@@ -57,6 +57,7 @@ Production (and Preview, if you want previews to work):
 | Name | Value |
 | --- | --- |
 | `DATABASE_URL` | Neon **pooled** string |
+| `DIRECT_URL` | Neon **direct** string. `prisma.config.ts` prefers this for migrations, so `npm run db:deploy` picks the right connection on its own. |
 | `AUTH_SECRET` | from step 2 |
 | `JOB_SECRET` | from step 2 |
 | `CRON_SECRET` | from step 2 |
@@ -78,22 +79,26 @@ those files vanish. If documents upload fine but 404 a day later, this is why.
 
 Trigger the first deploy (**Deployments → Redeploy**, or push a commit).
 
-Then, from your machine, point the migration and seed at Neon using the
-**direct** connection string:
+Then, from your machine, point the migration and seed at Neon. `prisma.config.ts`
+reads `DIRECT_URL` in preference to `DATABASE_URL`, so set that one:
 
 ```bash
-DATABASE_URL="<neon-direct-string>" npm run db:deploy
+DIRECT_URL="<neon-direct-string>" npm run db:deploy
 ```
 
 ```bash
-NODE_ENV=production DATABASE_URL="<neon-direct-string>" SEED_ADMIN_EMAIL="you@yourinstitute.org" SEED_ADMIN_PASSWORD="<a-real-password>" npm run db:seed
+NODE_ENV=production DIRECT_URL="<neon-direct-string>" SEED_ADMIN_EMAIL="you@yourinstitute.org" SEED_ADMIN_PASSWORD="<a-real-password>" npm run db:seed
 ```
 
-On Windows PowerShell, set the variables first instead:
+On Windows PowerShell the syntax differs — set each variable first, then run:
 
 ```bash
-$env:DATABASE_URL="<neon-direct-string>"; npm run db:deploy
+$env:DIRECT_URL="<neon-direct-string>"; npm run db:deploy
 ```
+
+Migrations are deliberately **not** part of the build. A build that migrates
+runs DDL against live student data every time it deploys, and leaves the
+database ahead of the code if you ever roll a deployment back.
 
 ## 8. First sign-in
 
