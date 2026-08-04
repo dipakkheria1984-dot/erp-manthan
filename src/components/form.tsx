@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useFormStatus } from "react-dom";
+import { createPortal, useFormStatus } from "react-dom";
 import { Alert, Button, Field, Textarea, buttonClass } from "@/components/ui";
 import type { ActionResult } from "@/lib/errors";
 import { cn } from "@/lib/cn";
@@ -135,7 +135,21 @@ export function Modal({
   if (!open) return null;
   const widthClass = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-3xl" }[width];
 
-  return (
+  /**
+   * Rendered into `document.body` rather than in place.
+   *
+   * `position: fixed` is resolved against the nearest ancestor with a
+   * transform, not the viewport — and the page shell animates in with
+   * `animate-rise`, which sets one on `<main>` and on every `PageHeader`. Left
+   * in the tree, this overlay was being sized to whichever of those contained
+   * it (a 966x78 strip, in the case of the staff-accounts header) and painted
+   * beneath the page content that followed it, so the dialog was neither
+   * visible nor clickable.
+   *
+   * A portal puts it outside those ancestors, where `inset-0` means the
+   * viewport and `z-50` competes at the top level, as intended.
+   */
+  return createPortal(
     <div className="animate-fade fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-crimson-950/40 p-4 backdrop-blur-sm sm:p-8">
       <button type="button" aria-label="Close" className="fixed inset-0 cursor-default" onClick={onClose} />
       <div
@@ -154,7 +168,8 @@ export function Modal({
         </header>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
