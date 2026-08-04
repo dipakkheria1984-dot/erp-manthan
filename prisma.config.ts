@@ -13,6 +13,15 @@ export default defineConfig({
     // Migrations take advisory locks and run DDL, neither of which survives a
     // transaction pooler, so they need the direct connection when one exists.
     // The app itself still uses the pooled DATABASE_URL — see src/lib/db.ts.
-    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
+    //
+    // The unpooled names are what Neon's Vercel integration writes, so a file
+    // produced by `vercel env pull` works as-is and nothing has to be copied
+    // between dashboards by hand. DATABASE_URL is the last resort: correct for
+    // a plain local Postgres, and the only option when no direct URL exists.
+    url:
+      process.env["DIRECT_URL"] ??
+      process.env["DATABASE_URL_UNPOOLED"] ??
+      process.env["POSTGRES_URL_NON_POOLING"] ??
+      process.env["DATABASE_URL"],
   },
 });
