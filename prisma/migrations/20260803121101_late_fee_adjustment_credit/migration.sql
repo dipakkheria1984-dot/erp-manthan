@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "DiscountReason" ADD VALUE 'LATE_FEE_ADJUSTMENT';

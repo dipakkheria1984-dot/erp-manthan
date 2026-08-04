@@ -1,0 +1,1110 @@
+// ERP System for Educational Institute — data model
+// All monetary values are stored as integer paise (₹1 = 100 paise) in columns
+// suffixed `Paise`. See src/lib/money.ts for formatting/parsing helpers.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum GuardianRelation {
+  FATHER
+  MOTHER
+  GUARDIAN
+}
+
+enum DepartmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CourseStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+enum BatchStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+  DISCONTINUED
+}
+
+/// Enrollment workflow: Draft -> Submitted -> Under Review -> Approved/Rejected -> Enrolled
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  ENROLLED
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum StudentStatus {
+  ACTIVE
+  DROPPED_OUT
+  EXPELLED
+  PASSED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  WAIVED
+}
+
+enum PaymentKind {
+  REGISTRATION
+  INSTALLMENT
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  CHEQUE
+  // The collection register carries an "Other" line for money that arrives by
+  // none of the above. Recorded as-is rather than folded into a nearby mode, so
+  // the Fee Collection report reconciles against the register.
+  OTHER
+}
+
+enum PaymentStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Why a notification was generated. Reminders are always fanned out to BOTH
+/// channels together (spec 3.3) — the pair shares a `groupKey`.
+enum NotificationKind {
+  APPLICATION_SUBMITTED
+  APPLICATION_STATUS_CHANGE
+  APPLICATION_INCOMPLETE
+  DOCUMENTS_PENDING
+  WELCOME
+  FEE_PRE_DUE
+  FEE_OVERDUE
+  RECEIPT
+  /// A document emailed by staff on request — a report or a student ledger.
+  DOCUMENT
+}
+
+enum WaiverContext {
+  STATUS_CHANGE
+  MANUAL
+}
+
+// ---------------------------------------------------------------------------
+// Module 9 — Institute Setup
+// ---------------------------------------------------------------------------
+
+/// Singleton row (id = 1) holding the institute's identity, used on report
+/// headers, receipts and outbound communications.
+model Institute {
+  id             Int     @id @default(1)
+  name           String
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  state          String?
+  pincode        String?
+  contactEmail   String?
+  contactPhone   String?
+  registrationNo String?
+  affiliationNo  String?
+  website        String?
+
+  /// Logo, uploaded through Setup and held under UPLOAD_DIR like every other
+  /// upload — deliberately not a filesystem path typed by the admin, which
+  /// would break as soon as the app ran on a different machine.
+  logoStoragePath String?
+  logoFileName    String?
+  logoMimeType    String?
+  logoSizeBytes   Int?
+  /// Bumped on every replacement, and used to bust the browser's image cache.
+  logoUpdatedAt   DateTime?
+
+  /// Appearance of every generated PDF — receipts, admission forms, the welcome
+  /// kit and report exports. Both are ids from src/lib/print-theme.ts, kept as
+  /// plain strings so a new preset needs no migration.
+  printColorScheme String  @default("monochrome")
+  printTheme       String  @default("classic")
+  /// Accent colour (`#rrggbb`) when `printColorScheme` is "custom"; ignored otherwise.
+  printAccentHex   String?
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+/// Singleton row (id = 1) holding institute-wide business configuration.
+/// Several of these are deliberately hidden from non-admin UI (spec 2.2).
+model InstituteConfig {
+  id Int @id @default(1)
+
+  // Student identity
+  studentIdPrefix String @default("STU")
+  lfNoLength      Int    @default(5)
+  lfNoNext        Int    @default(10001)
+
+  // Admission
+  minRegistrationFeePaise       Int @default(1000000) // ₹10,000 floor (spec 1.4 / 9.2)
+  /// Hidden from Admission Staff UI. Discounts at or below this are auto-approved.
+  scholarshipAutoApprovePercent Int @default(10)
+
+  // Installments
+  installmentMin Int @default(1)
+  installmentMax Int @default(14)
+
+  // Late fee
+  lateFeeGraceDays             Int @default(0)
+  /// If the remaining unpaid balance is at or below this, no late fee applies.
+  minOutstandingThresholdPaise Int @default(50000) // ₹500
+  /// The day the late fee policy starts counting. Nothing accrues for time
+  /// before it, however long an installment has been overdue — an institute
+  /// going live, or forgiving everything up to a date, sets it and every
+  /// balance is recomputed from that day forward. Null means "always applied",
+  /// which is how it behaved before this existed.
+  ///
+  /// It shifts only the *charge*: how overdue an installment actually is still
+  /// reads from its own due date, so reports, buckets and reminders are honest.
+  lateFeeEffectiveFrom         DateTime?
+
+  // Reminder cadence (spec 3.3 / 9.3)
+  preDueReminderDays          Int @default(7)
+  overdueReminderIntervalDays Int @default(3)
+
+  // Numbering (spec 9.4)
+  receiptPrefix      String @default("RCP")
+  receiptPadding     Int    @default(5)
+  applicationPrefix  String @default("APP")
+  applicationPadding Int    @default(5)
+
+  // Auth policy (spec 8.2)
+  passwordMinLength      Int @default(8)
+  maxFailedLoginAttempts Int @default(5)
+  lockoutMinutes         Int @default(15)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+/// Email + WhatsApp gateway configuration (spec 9.3). Providers are pluggable —
+/// see src/lib/notifications. When unconfigured, adapters run in log-only mode.
+model CommunicationConfig {
+  id Int @id @default(1)
+
+  /// mock | smtp | gmail. Gmail is SMTP with the host/port fixed and the
+  /// password required to be a 16-character Google App Password.
+  emailProvider String  @default("mock")
+  smtpHost      String?
+  smtpPort      Int?
+  smtpSecure    Boolean @default(false)
+  smtpUser      String?
+  smtpPassword  String?
+  smtpFromName  String?
+  smtpFromEmail String?
+
+  whatsappProvider String? // mock | twilio | gupshup | meta
+  whatsappApiUrl   String?
+  whatsappApiKey   String?
+  whatsappSenderId String?
+  /// Provider-specific extras so a new gateway can be added without a migration.
+  whatsappExtra    Json?
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+/// Institute-wide late fee slabs (spec 3.2). `maxDaysOverdue` null = open ended.
+model LateFeeSlab {
+  id             Int      @id @default(autoincrement())
+  minDaysOverdue Int
+  maxDaysOverdue Int?
+  amountPaise    Int
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([minDaysOverdue])
+}
+
+model AcademicYear {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "2025-26"
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications   Application[]
+  semesters      Semester[]
+  feeAssignments FeeAssignment[]
+}
+
+/// Atomic counters for LF numbers, receipt numbers and application IDs.
+model Sequence {
+  key       String   @id
+  nextValue Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Module 8 — User Management
+// ---------------------------------------------------------------------------
+
+/// Predefined roles are seeded with `isSystem = true`; Admin can create custom
+/// roles with any combination of permissions (spec 8.1).
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  permissions String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  employeeId   String     @unique
+  email        String     @unique
+  phone        String?
+  passwordHash String
+  roleId       String
+  departmentId String?
+  status       UserStatus @default(ACTIVE)
+
+  mustResetPassword   Boolean   @default(true)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role       Role        @relation(fields: [roleId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+
+  sessions              Session[]
+  auditLogs             AuditLog[]
+  batchFeeHistories     BatchFeeHistory[]
+  applicationsCreated   Application[]          @relation("ApplicationCreatedBy")
+  applicationsReviewed  Application[]          @relation("ApplicationReviewedBy")
+  documentsVerified     ApplicationDocument[]
+  feeAssignmentsCreated FeeAssignment[]
+  paymentsCollected     Payment[]              @relation("PaymentCollectedBy")
+  paymentsCancelled     Payment[]              @relation("PaymentCancelledBy")
+  installmentsWaived    Installment[]          @relation("InstallmentWaivedBy")
+  lateFeesWaived        Installment[]          @relation("InstallmentLateFeeWaivedBy")
+  extraChargesRaised    Installment[]          @relation("InstallmentRaisedBy")
+  discountsGranted      Discount[]             @relation("DiscountGrantedBy")
+  discountsCancelled    Discount[]             @relation("DiscountCancelledBy")
+  statusChanges         StudentStatusHistory[]
+  promotionRuns         PromotionRun[]
+  termsVersions         TermsVersion[]
+
+  @@index([roleId])
+  @@index([departmentId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// System-wide action log (spec 8.4). Never pruned by the application.
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // e.g. "application.approve"
+  entityType String? // e.g. "Application"
+  entityId   String?
+  summary    String
+  /// Mandatory business reason where the spec requires one (approvals,
+  /// rejections, status changes, receipt cancellation).
+  reason     String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Module 5 — Academic Structure
+// ---------------------------------------------------------------------------
+
+model Department {
+  id               String           @id @default(cuid())
+  name             String
+  code             String           @unique
+  headOfDepartment String?
+  status           DepartmentStatus @default(ACTIVE)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  courses      Course[]
+  users        User[]
+  applications Application[]
+  students     Student[]
+}
+
+model Course {
+  id             String       @id @default(cuid())
+  name           String
+  code           String       @unique
+  departmentId   String
+  durationYears  Int
+  /// Minimum 2 — single-semester courses are not allowed (spec 5.2).
+  totalSemesters Int
+  status         CourseStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  department   Department    @relation(fields: [departmentId], references: [id])
+  batches      Batch[]
+  applications Application[]
+  students     Student[]
+
+  @@index([departmentId])
+}
+
+/// A Batch is a fixed cohort: the same students move together through every
+/// semester of the course (spec 5.3). No waitlist — enrollment is blocked at
+/// capacity.
+model Batch {
+  id             String      @id @default(cuid())
+  name           String
+  code           String      @unique
+  courseId       String
+  startDate      DateTime
+  completionDate DateTime
+  totalSeats     Int
+  status         BatchStatus @default(UPCOMING)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  course        Course            @relation(fields: [courseId], references: [id])
+  feeHistory    BatchFeeHistory[]
+  semesters     Semester[]
+  applications  Application[]
+  students      Student[]
+  promotionRuns PromotionRun[]
+
+  @@index([courseId])
+}
+
+/// Versioned preset tuition fee for a batch (spec 2.4). A student's tuition rate
+/// is locked to the row effective on their enrollment date.
+model BatchFeeHistory {
+  id              String   @id @default(cuid())
+  batchId         String
+  tuitionFeePaise Int
+  effectiveFrom   DateTime
+  note            String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+
+  batch     Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@unique([batchId, effectiveFrom])
+  @@index([batchId, effectiveFrom])
+}
+
+/// Exam & Activity fees live here and are deliberately NOT rate-locked — they
+/// apply at their current value for the academic year (spec 2.4 / 5.4).
+model Semester {
+  id               String   @id @default(cuid())
+  batchId          String
+  semesterNumber   Int
+  startDate        DateTime
+  endDate          DateTime
+  examFeePaise     Int      @default(0)
+  activityFeePaise Int      @default(0)
+  academicYearId   String?
+  /// Which year of the course this semester belongs to (1-based).
+  yearNumber       Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  batch        Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear? @relation(fields: [academicYearId], references: [id])
+
+  studentsCurrentlyIn Student[]       @relation("StudentCurrentSemester")
+  feeAssignments      FeeAssignment[]
+  promotionsFrom      PromotionRun[]  @relation("PromotionFromSemester")
+  promotionsTo        PromotionRun[]  @relation("PromotionToSemester")
+
+  @@unique([batchId, semesterNumber])
+  @@index([batchId])
+}
+
+// ---------------------------------------------------------------------------
+// Module 1 — Student Enrollment
+// ---------------------------------------------------------------------------
+
+/// Admin-configurable required-document checklist (spec 1.3).
+model DocumentRequirement {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  label      String
+  isRequired Boolean  @default(true)
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Application {
+  id            String            @id @default(cuid())
+  /// Assigned on submission (spec 1.4 step 6). Null while Draft.
+  applicationNo String?           @unique
+  status        ApplicationStatus @default(DRAFT)
+
+  // 1. Student information
+  fullName   String
+  dob        DateTime?
+  gender     Gender
+  photoPath  String?
+  bloodGroup String?
+
+  // Contact
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  pincode      String?
+  phone        String?
+  email        String?
+
+  // Unique identifiers
+  nationalId           String? // Aadhaar / national ID
+  previousEnrollmentNo String?
+
+  // Previous academic record
+  previousInstitution    String?
+  previousQualification  String?
+  previousMarks          String?
+  hasTransferCertificate Boolean @default(false)
+
+  // 3. Course / department / batch selection
+  academicYearId String?
+  departmentId   String?
+  courseId       String?
+  batchId        String?
+
+  // 5. Registration fee gate (min ₹10,000, partial or full)
+  registrationFeePaidPaise Int     @default(0)
+  isProvisional            Boolean @default(false)
+
+  // Fee assignment / scholarship (module 2)
+  /// A scholarship is quoted either as a percentage of the batch tuition or as
+  /// a flat figure. Whichever is used, the other is zero: a non-zero `Paise`
+  /// value means the concession was agreed as an amount.
+  requestedScholarshipPercent Int     @default(0)
+  requestedScholarshipPaise   Int     @default(0)
+  approvedScholarshipPercent  Int?
+  approvedScholarshipPaise    Int?
+  /// True when the requested discount exceeded the hidden auto-approval
+  /// threshold and therefore needs Admin sign-off during review.
+  scholarshipNeedsApproval    Boolean @default(false)
+
+  // Review / decision
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewedById   String?
+  decisionReason String?
+  /// Populated by the duplicate check (spec 1.5) at submission time.
+  duplicateFlags Json?
+
+  // Approval outputs
+  lfNo        Int?    @unique
+  studentCode String? @unique
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  academicYear AcademicYear? @relation(fields: [academicYearId], references: [id])
+  department   Department?   @relation(fields: [departmentId], references: [id])
+  course       Course?       @relation(fields: [courseId], references: [id])
+  batch        Batch?        @relation(fields: [batchId], references: [id])
+  createdBy    User?         @relation("ApplicationCreatedBy", fields: [createdById], references: [id])
+  reviewedBy   User?         @relation("ApplicationReviewedBy", fields: [reviewedById], references: [id])
+
+  guardians     Guardian[]
+  documents     ApplicationDocument[]
+  feePlan       ApplicationInstallment[]
+  student       Student?
+  payments      Payment[]
+  notifications NotificationLog[]
+
+  @@index([status])
+  @@index([batchId])
+  @@index([courseId])
+  @@index([departmentId])
+  @@index([fullName])
+  @@index([createdAt])
+}
+
+/// At least one guardian is compulsory before an application can be submitted
+/// (spec 1.1) — enforced in the submission validator.
+model Guardian {
+  id            String           @id @default(cuid())
+  applicationId String
+  relation      GuardianRelation
+  name          String
+  occupation    String?
+  phone         String?
+  email         String?
+  isPrimary     Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+model ApplicationDocument {
+  id              String         @id @default(cuid())
+  applicationId   String
+  requirementCode String
+  label           String
+  fileName        String
+  storagePath     String
+  mimeType        String
+  sizeBytes       Int
+  status          DocumentStatus @default(PENDING)
+  remarks         String?
+  verifiedById    String?
+  verifiedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  verifiedBy  User?       @relation(fields: [verifiedById], references: [id])
+
+  @@index([applicationId])
+}
+
+/// Installment plan drafted by the Registrar during enrollment, before any fee
+/// is collected. Each row is copied to a real Installment when the application
+/// is approved; the plan covers the whole first-semester fee, including the
+/// registration amount collected at enrollment.
+model ApplicationInstallment {
+  id            String   @id @default(cuid())
+  applicationId String
+  seqNo         Int
+  dueDate       DateTime
+  amountPaise   Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, seqNo])
+  @@index([applicationId])
+}
+
+// ---------------------------------------------------------------------------
+// Module 4 — Student record & status
+// ---------------------------------------------------------------------------
+
+model Student {
+  id            String        @id @default(cuid())
+  /// Admin-configured prefix + 5-digit LF No. (spec 1.4 step 8).
+  studentCode   String        @unique
+  lfNo          Int           @unique
+  applicationId String        @unique
+  status        StudentStatus @default(ACTIVE)
+  statusReason  String?
+
+  // Snapshot of personal data at enrollment — past records are never overwritten
+  // by later edits to the application (spec 1.8).
+  fullName     String
+  dob          DateTime?
+  gender       Gender
+  photoPath    String?
+  bloodGroup   String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  pincode      String?
+  phone        String?
+  email        String?
+  nationalId   String?
+
+  departmentId      String
+  courseId          String
+  batchId           String
+  currentSemesterId String?
+  enrollmentDate    DateTime @default(now())
+
+  /// Informational only — no clearance workflow (spec 6.3).
+  hasBacklog    Boolean @default(false)
+  backlogRemark String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application     Application @relation(fields: [applicationId], references: [id])
+  department      Department  @relation(fields: [departmentId], references: [id])
+  course          Course      @relation(fields: [courseId], references: [id])
+  batch           Batch       @relation(fields: [batchId], references: [id])
+  currentSemester Semester?   @relation("StudentCurrentSemester", fields: [currentSemesterId], references: [id])
+
+  feeAssignments   FeeAssignment[]
+  payments         Payment[]
+  discounts        Discount[]
+  statusHistory    StudentStatusHistory[]
+  promotionEntries PromotionRunStudent[]
+  notifications    NotificationLog[]
+
+  @@index([batchId])
+  @@index([courseId])
+  @@index([departmentId])
+  @@index([status])
+  @@index([currentSemesterId])
+}
+
+model StudentStatusHistory {
+  id          String        @id @default(cuid())
+  studentId   String
+  fromStatus  StudentStatus
+  toStatus    StudentStatus
+  /// Mandatory for Dropped-out, Expelled and reinstatement (spec 4.2 / 4.4).
+  reason      String?
+  changedById String?
+  changedAt   DateTime      @default(now())
+
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  changedBy User?   @relation(fields: [changedById], references: [id])
+
+  @@index([studentId, changedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Module 2/3 — Fee assignment, installments, payments
+// ---------------------------------------------------------------------------
+
+/// One row per student per semester. Captures the locked tuition rate, the
+/// scholarship applied (Year 1 only) and the non-locked exam/activity fees.
+model FeeAssignment {
+  id             String  @id @default(cuid())
+  studentId      String
+  semesterId     String
+  academicYearId String?
+  /// 1-based year of the course this assignment belongs to.
+  yearNumber     Int
+  /// True when this is a repeat/re-enrollment year — tuition resets to the
+  /// batch's current preset rate (spec 2.5).
+  isRepeat       Boolean @default(false)
+
+  /// Batch preset tuition locked at enrollment (spec 2.4). Zero when this
+  /// semester does not re-trigger tuition (spec 6.4).
+  lockedTuitionRatePaise Int @default(0)
+  tuitionComponentPaise  Int @default(0)
+  scholarshipPercent     Int @default(0)
+  scholarshipAmountPaise Int @default(0)
+  examFeePaise           Int @default(0)
+  activityFeePaise       Int @default(0)
+  totalPayablePaise      Int @default(0)
+
+  /// Set for assignments that are not a normal semester charge — e.g. the
+  /// opening balance carried in for a student migrated by bulk import.
+  note String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  semester     Semester      @relation(fields: [semesterId], references: [id])
+  academicYear AcademicYear? @relation(fields: [academicYearId], references: [id])
+  createdBy    User?         @relation(fields: [createdById], references: [id])
+
+  installments Installment[]
+
+  @@unique([studentId, semesterId])
+  @@index([studentId])
+  @@index([semesterId])
+}
+
+/// 1–14 installments per fee assignment (range is Admin-configurable). Every due
+/// date must fall on or before the batch completion date (spec 2.6).
+model Installment {
+  id              String            @id @default(cuid())
+  feeAssignmentId String
+  seqNo           Int
+  dueDate         DateTime
+  amountPaise     Int
+  status          InstallmentStatus @default(PENDING)
+
+  /// Late fee currently assessed against this installment, recalculated on
+  /// payment, cancellation and by the nightly job (spec 3.2).
+  lateFeePaise     Int       @default(0)
+  lateFeeUpdatedAt DateTime?
+
+  /// Late fee written off for this installment while the principal stands.
+  /// Suppresses further accrual, so the nightly job will not re-apply it.
+  /// Anything already collected against a late fee is not refunded.
+  /// Part of the accrued late fee written off. A full waiver also sets
+  /// `lateFeeWaived`, which stops anything further accruing.
+  lateFeeWaivedPaise  Int       @default(0)
+  /// Late fee that had already been collected when it was waived. The money is
+  /// not refunded: it is credited against what the family owes next, as a
+  /// `LATE_FEE_ADJUSTMENT` discount. Recorded here so restoring the late fee
+  /// cannot quietly charge them twice.
+  lateFeeCreditedPaise Int      @default(0)
+  lateFeeWaived       Boolean   @default(false)
+  lateFeeWaivedAt     DateTime?
+  lateFeeWaivedById   String?
+  lateFeeWaivedReason String?
+
+  /// Cached sum of the active discounts against this installment, maintained by
+  /// `refreshInstallment` exactly as `lateFeePaise` is. The Discount rows are
+  /// the record; this is what the balance calculation reads.
+  discountPaise Int @default(0)
+
+  waivedAt      DateTime?
+  waivedReason  String?
+  waivedById    String?
+  waivedContext WaiverContext?
+
+  /// Set on an ad-hoc charge raised after enrollment — an event fee, a fine,
+  /// a re-exam charge. Null on the ordinary semester installments, which come
+  /// from the fee plan agreed at admission.
+  ///
+  /// An extra charge is an installment on purpose: collection, receipts, the
+  /// ledger, the Fee Due report, reminders and late fees then apply to it
+  /// without a second code path.
+  extraChargeKind ExtraChargeKind?
+  /// What the charge is for, printed on the ledger and the collection screen.
+  /// Always set when `extraChargeKind` is.
+  label           String?
+  raisedById      String?
+  raisedReason    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  feeAssignment   FeeAssignment @relation(fields: [feeAssignmentId], references: [id], onDelete: Cascade)
+  waivedBy        User?         @relation("InstallmentWaivedBy", fields: [waivedById], references: [id])
+  lateFeeWaivedBy User?         @relation("InstallmentLateFeeWaivedBy", fields: [lateFeeWaivedById], references: [id])
+  raisedBy        User?         @relation("InstallmentRaisedBy", fields: [raisedById], references: [id])
+
+  payments      Payment[]
+  discounts     Discount[]        @relation("DiscountInstallment")
+  /// Credits handed back elsewhere because this installment's collected late
+  /// fee was waived.
+  lateFeeCredits Discount[]       @relation("DiscountLateFeeSource")
+  notifications NotificationLog[]
+
+  @@unique([feeAssignmentId, seqNo])
+  @@index([dueDate, status])
+  @@index([status])
+}
+
+/// What an ad-hoc charge raised after enrollment is for. Recorded alongside the
+/// free-text label so "what did we bill in fines this year" is a query rather
+/// than a reading exercise.
+enum ExtraChargeKind {
+  ACTIVITY
+  EVENT
+  PENALTY
+  OTHER
+}
+
+/// Why a discount was granted. Recorded so the Admin can answer "who got a
+/// concession and on what grounds" without reading free text.
+enum DiscountReason {
+  EARLY_PAYMENT
+  FINANCIAL_HARDSHIP
+  MERIT
+  SIBLING
+  STAFF_WARD
+  /// Not a concession at all: a late fee the family already paid has since been
+  /// waived, and the money stays with the institute as a credit against what
+  /// they owe next. Never offered in the discount form — only
+  /// `waiveLateFeeAction` writes it.
+  LATE_FEE_ADJUSTMENT
+  OTHER
+}
+
+/// An Admin-granted concession on one installment (spec 2.2 extension).
+///
+/// Distinct from the Year-1 scholarship, which is fixed at approval and baked
+/// into the fee assignment, and from a waiver, which writes off a whole
+/// installment. A discount reduces the principal owed on a single installment
+/// and can be reversed — like a receipt, it is cancelled, never deleted.
+model Discount {
+  id            String         @id @default(cuid())
+  installmentId String
+  studentId     String
+  reason        DiscountReason
+  /// Set when the Admin entered a percentage; kept for the audit trail even
+  /// though `amountPaise` is what actually applies.
+  percent       Int?
+  amountPaise   Int
+  /// Mandatory free-text justification, printed nowhere but always audited.
+  note          String
+
+  /// Set only on a `LATE_FEE_ADJUSTMENT`: the installment whose already-collected
+  /// late fee this credit hands back. Keeps the two ends of the adjustment tied
+  /// together, so cancelling the credit releases the source installment and the
+  /// fine can be restored without charging the family twice.
+  lateFeeSourceInstallmentId String?
+
+  grantedById String?
+  grantedAt   DateTime @default(now())
+
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancellationReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  installment     Installment  @relation("DiscountInstallment", fields: [installmentId], references: [id], onDelete: Cascade)
+  lateFeeSource   Installment? @relation("DiscountLateFeeSource", fields: [lateFeeSourceInstallmentId], references: [id])
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  grantedBy   User?       @relation("DiscountGrantedBy", fields: [grantedById], references: [id])
+  cancelledBy User?       @relation("DiscountCancelledBy", fields: [cancelledById], references: [id])
+
+  @@index([installmentId])
+  @@index([studentId])
+  @@index([grantedAt])
+}
+
+/// A single money-in transaction. Partial payments are allowed, so an
+/// installment may have many. Cancelled rows are voided, never deleted, and the
+/// receipt number is retained (spec 3.4).
+model Payment {
+  id         String        @id @default(cuid())
+  /// One receipt covers one collection. A single amount can settle several
+  /// installments (FIFO), so a receipt number is shared by one row per
+  /// installment it was applied to — `receiptSeq` numbers those lines.
+  receiptNo  String
+  receiptSeq Int           @default(1)
+  kind       PaymentKind
+  status     PaymentStatus @default(ACTIVE)
+
+  /// Registration-fee payments belong to an Application (pre-enrollment);
+  /// installment payments belong to a Student.
+  applicationId String?
+  studentId     String?
+  installmentId String?
+
+  amountPaise         Int
+  /// Portion of `amountPaise` applied to accrued late fee rather than principal.
+  lateFeePortionPaise Int @default(0)
+
+  paymentDate   DateTime
+  mode          PaymentMode
+  referenceNo   String?
+  remarks       String?
+  collectedById String?
+
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancellationReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application Application? @relation(fields: [applicationId], references: [id])
+  student     Student?     @relation(fields: [studentId], references: [id])
+  installment Installment? @relation(fields: [installmentId], references: [id])
+  collectedBy User?        @relation("PaymentCollectedBy", fields: [collectedById], references: [id])
+  cancelledBy User?        @relation("PaymentCancelledBy", fields: [cancelledById], references: [id])
+
+  @@unique([receiptNo, receiptSeq])
+  @@index([receiptNo])
+  @@index([studentId, paymentDate])
+  @@index([installmentId])
+  @@index([applicationId])
+  @@index([paymentDate])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Module 3 — Notifications
+// ---------------------------------------------------------------------------
+
+model NotificationLog {
+  id      String              @id @default(cuid())
+  kind    NotificationKind
+  channel NotificationChannel
+  status  NotificationStatus  @default(PENDING)
+
+  /// Email + WhatsApp copies of the same reminder share this key.
+  groupKey String?
+
+  studentId     String?
+  applicationId String?
+  installmentId String?
+
+  recipient         String
+  subject           String?
+  body              String
+  provider          String?
+  providerMessageId String?
+  error             String?
+  /// Set when a failure has been surfaced to Admin (spec 3.3).
+  acknowledgedAt    DateTime?
+
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  student     Student?     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  installment Installment? @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([installmentId, kind, createdAt])
+  @@index([studentId])
+  @@index([groupKey])
+}
+
+/// Bookkeeping for the scheduled reminder job so overdue recurrence intervals
+/// can be honoured without double-sending.
+model ReminderRun {
+  id          String   @id @default(cuid())
+  runAt       DateTime @default(now())
+  preDueSent  Int      @default(0)
+  overdueSent Int      @default(0)
+  failures    Int      @default(0)
+  notes       String?
+}
+
+// ---------------------------------------------------------------------------
+// Module 6 — Promotion
+// ---------------------------------------------------------------------------
+
+model PromotionRun {
+  id             String   @id @default(cuid())
+  batchId        String
+  fromSemesterId String
+  toSemesterId   String
+  runById        String?
+  runAt          DateTime @default(now())
+  includedCount  Int      @default(0)
+  excludedCount  Int      @default(0)
+  notes          String?
+
+  batch        Batch    @relation(fields: [batchId], references: [id])
+  fromSemester Semester @relation("PromotionFromSemester", fields: [fromSemesterId], references: [id])
+  toSemester   Semester @relation("PromotionToSemester", fields: [toSemesterId], references: [id])
+  runBy        User?    @relation(fields: [runById], references: [id])
+
+  entries PromotionRunStudent[]
+
+  @@index([batchId, runAt])
+}
+
+model PromotionRunStudent {
+  id              String  @id @default(cuid())
+  promotionRunId  String
+  studentId       String
+  included        Boolean
+  exclusionReason String?
+  backlogFlagged  Boolean @default(false)
+
+  promotionRun PromotionRun @relation(fields: [promotionRunId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionRunId, studentId])
+  @@index([studentId])
+}
+
+// ---------------------------------------------------------------------------
+// Module 10 — Terms & Conditions
+// ---------------------------------------------------------------------------
+
+/// Which printed document a set of terms applies to. The admission form and the
+/// fee receipt carry different terms, each versioned on its own timeline.
+enum TermsDocument {
+  ADMISSION
+  RECEIPT
+}
+
+/// Print-only terms (spec 10.2). Every edit creates a new version; old versions
+/// are retained for legal/audit purposes. Version numbers run per document, so
+/// the admission terms and the receipt terms advance independently.
+model TermsVersion {
+  id            Int           @id @default(autoincrement())
+  document      TermsDocument @default(ADMISSION)
+  version       Int
+  title         String        @default("Terms and Conditions")
+  content       String // rich text (HTML)
+  effectiveFrom DateTime
+  createdById   String?
+  createdAt     DateTime      @default(now())
+
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@unique([document, version])
+  @@index([document, effectiveFrom])
+}

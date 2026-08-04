@@ -1,0 +1,239 @@
+@import "tailwindcss";
+
+/**
+ * Crimson theme.
+ *
+ * One ramp drives everything: the brand sits at 600, hovers at 700, and the
+ * tints at 50/100 carry the colour into surfaces — nav, table headers, tiles —
+ * so the app reads as one piece rather than grey furniture with red buttons.
+ *
+ * The neutrals are warmed very slightly towards the brand hue. A pure blue-grey
+ * next to crimson looks accidental; a warm grey looks chosen.
+ */
+:root {
+  color-scheme: light;
+
+  --crimson-50: #fff1f4;
+  --crimson-100: #ffe0e7;
+  --crimson-200: #ffc6d3;
+  --crimson-300: #fb9cb3;
+  --crimson-400: #f4688e;
+  --crimson-500: #e33a6c;
+  --crimson-600: #c1123c;
+  --crimson-700: #a30e33;
+  --crimson-800: #87102e;
+  --crimson-900: #71122b;
+  --crimson-950: #400313;
+
+  --background: #f7f5f6;
+  --surface: #ffffff;
+  --surface-muted: #fbf8f9;
+  --foreground: #1a1418;
+  --muted: #6d626a;
+  --border: #e8e1e4;
+  --border-strong: #d7cbd0;
+
+  --brand: var(--crimson-600);
+  --brand-strong: var(--crimson-700);
+  --brand-deep: var(--crimson-900);
+  --brand-soft: var(--crimson-50);
+  --brand-tint: var(--crimson-100);
+  --brand-fg: #ffffff;
+
+  /* Semantics kept clear of the brand hue, so "destructive" and "primary" are
+     never told apart by shade alone. Danger leans orange-red, the brand pink. */
+  --danger: #b3261e;
+  --danger-soft: #fdf0ee;
+  --success: #0f7a53;
+  --success-soft: #eefaf4;
+  --warning: #a65a07;
+  --warning-soft: #fdf5e8;
+  --info: #1f4fa8;
+  --info-soft: #eef3fd;
+
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-fg: var(--brand-fg);
+
+  --color-crimson-50: var(--crimson-50);
+  --color-crimson-100: var(--crimson-100);
+  --color-crimson-200: var(--crimson-200);
+  --color-crimson-300: var(--crimson-300);
+  --color-crimson-400: var(--crimson-400);
+  --color-crimson-500: var(--crimson-500);
+  --color-crimson-600: var(--crimson-600);
+  --color-crimson-700: var(--crimson-700);
+  --color-crimson-800: var(--crimson-800);
+  --color-crimson-900: var(--crimson-900);
+  --color-crimson-950: var(--crimson-950);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  /* Declared here rather than in :root so Tailwind generates real utilities —
+     `shadow-card`, `hover:shadow-lift`. An arbitrary `shadow-[var(--x)]` is
+     ambiguous in v4 (colour or shadow?) and is silently dropped. */
+  --shadow-card: 0 1px 2px rgba(64, 3, 19, 0.06), 0 1px 3px rgba(64, 3, 19, 0.04);
+  --shadow-lift: 0 10px 24px -12px rgba(64, 3, 19, 0.28), 0 2px 6px rgba(64, 3, 19, 0.06);
+  --shadow-brand: 0 6px 16px -6px rgba(193, 18, 60, 0.5);
+  --shadow-modal: 0 24px 60px -20px rgba(64, 3, 19, 0.45);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  /* A wash of the brand at the top of the page, under everything. */
+  background-image: radial-gradient(85rem 32rem at 50% -14rem, var(--crimson-100), transparent 70%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+::selection {
+  background: var(--crimson-200);
+  color: var(--crimson-950);
+}
+
+/* Scrollbars picked up the theme rather than staying default-grey. */
+* {
+  scrollbar-color: var(--crimson-200) transparent;
+  scrollbar-width: thin;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Paint helpers                                                               */
+/* -------------------------------------------------------------------------- */
+
+.brand-gradient {
+  background-image: linear-gradient(135deg, var(--crimson-600) 0%, var(--crimson-800) 100%);
+}
+
+.brand-gradient-soft {
+  background-image: linear-gradient(135deg, var(--crimson-50) 0%, #ffffff 55%);
+}
+
+/* The hairline of colour that heads a card or a table. */
+.brand-rule {
+  background-image: linear-gradient(90deg, var(--crimson-600), var(--crimson-400) 45%, transparent);
+}
+
+.text-gradient-brand {
+  background-image: linear-gradient(120deg, var(--crimson-800), var(--crimson-500));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Motion — enough to feel alive, never enough to wait for                     */
+/* -------------------------------------------------------------------------- */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheen {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-fade {
+  animation: fade-in 0.24s ease-out both;
+}
+
+/* Staggers a grid of tiles so a dashboard assembles itself rather than blinking
+   into place. Cheap: six steps, then everything lands together. */
+.stagger > * {
+  animation: rise-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.02s; }
+.stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.stagger > *:nth-child(3) { animation-delay: 0.1s; }
+.stagger > *:nth-child(4) { animation-delay: 0.14s; }
+.stagger > *:nth-child(5) { animation-delay: 0.18s; }
+.stagger > *:nth-child(6) { animation-delay: 0.22s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Printed output (admission form, receipts) drops all chrome.                 */
+/* -------------------------------------------------------------------------- */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    background-image: none;
+  }
+  .print-page {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  /* Tints and gradients waste toner and grey out on most office printers. */
+  .brand-gradient,
+  .brand-gradient-soft,
+  .brand-rule {
+    background-image: none !important;
+  }
+  [class*="shadow"] {
+    box-shadow: none !important;
+  }
+}

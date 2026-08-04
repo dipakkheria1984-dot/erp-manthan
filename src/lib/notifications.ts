@@ -1,0 +1,298 @@
+import "server-only";
+import { randomUUID } from "node:crypto";
+import { prisma } from "@/lib/db";
+import { getCommunicationConfig, getInstitute } from "@/lib/config";
+import { formatPaise } from "@/lib/money";
+import { formatDate } from "@/lib/dates";
+import { emailProviderFor, whatsappProviderFor, type Attachment } from "@/lib/notification-providers";
+import type { NotificationKind } from "@/generated/prisma/client";
+
+/**
+ * Notification dispatch.
+ *
+ * Spec 3.3: every reminder goes out on Email **and** WhatsApp together — this is
+ * not configurable per student or per institute. `deliver` therefore always
+ * fans out to both channels and links the pair with a shared `groupKey`.
+ *
+ * Failures are recorded on the NotificationLog row rather than thrown, so a
+ * bounced address never rolls back the business action that triggered it.
+ */
+
+type Recipient = { email: string | null; phone: string | null };
+
+type DeliverInput = {
+  kind: NotificationKind;
+  recipient: Recipient;
+  subject: string;
+  body: string;
+  studentId?: string;
+  applicationId?: string;
+  installmentId?: string;
+};
+
+export async function deliver(input: DeliverInput): Promise<{ sent: number; failed: number }> {
+  const config = await getCommunicationConfig();
+  const email = emailProviderFor(config);
+  const whatsapp = whatsappProviderFor(config);
+  const groupKey = randomUUID();
+
+  const targets = [
+    { channel: "EMAIL" as const, provider: email, to: input.recipient.email ?? "" },
+    { channel: "WHATSAPP" as const, provider: whatsapp, to: input.recipient.phone ?? "" },
+  ];
+
+  let sent = 0;
+  let failed = 0;
+
+  for (const target of targets) {
+    const log = await prisma.notificationLog.create({
+      data: {
+        kind: input.kind,
+        channel: target.channel,
+        groupKey,
+        studentId: input.studentId ?? null,
+        applicationId: input.applicationId ?? null,
+        installmentId: input.installmentId ?? null,
+        recipient: target.to,
+        subject: input.subject,
+        body: input.body,
+        provider: target.provider.name,
+      },
+    });
+
+    const result = await target.provider.send({
+      to: target.to,
+      subject: input.subject,
+      body: input.body,
+    });
+
+    if (result.ok) {
+      sent += 1;
+      await prisma.notificationLog.update({
+        where: { id: log.id },
+        data: { status: "SENT", sentAt: new Date(), providerMessageId: result.providerMessageId ?? null },
+      });
+    } else {
+      failed += 1;
+      // Flagged to Admin on the Reminders screen (spec 3.3).
+      await prisma.notificationLog.update({
+        where: { id: log.id },
+        data: { status: "FAILED", error: result.error },
+      });
+    }
+  }
+
+  return { sent, failed };
+}
+
+/**
+ * Send one email, with files attached, and record it in the notification log.
+ *
+ * Separate from `deliver` on purpose. `deliver` exists for reminders, which the
+ * spec requires to go out on Email *and* WhatsApp together; this is for a member
+ * of staff pressing "Email" on a document, where the whole point is the
+ * attachment and the text adapters have nowhere to put one.
+ *
+ * Like `deliver`, a delivery failure is recorded rather than thrown — the caller
+ * reports it to the user, and the log is what Admin reviews later.
+ */
+export async function deliverEmail(input: {
+  kind: NotificationKind;
+  to: string;
+  subject: string;
+  body: string;
+  attachments?: Attachment[];
+  studentId?: string;
+  applicationId?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const config = await getCommunicationConfig();
+  const provider = emailProviderFor(config);
+
+  const log = await prisma.notificationLog.create({
+    data: {
+      kind: input.kind,
+      channel: "EMAIL",
+      studentId: input.studentId ?? null,
+      applicationId: input.applicationId ?? null,
+      recipient: input.to,
+      subject: input.subject,
+      // The attachment is not stored — it is rebuilt from live data on demand —
+      // so the log notes what went out rather than pretending to hold a copy.
+      body: input.attachments?.length
+        ? `${input.body}\n\n[Attached: ${input.attachments.map((a) => a.filename).join(", ")}]`
+        : input.body,
+      provider: provider.name,
+    },
+  });
+
+  const result = await provider.send({
+    to: input.to,
+    subject: input.subject,
+    body: input.body,
+    attachments: input.attachments,
+  });
+
+  await prisma.notificationLog.update({
+    where: { id: log.id },
+    data: result.ok
+      ? { status: "SENT", sentAt: new Date(), providerMessageId: result.providerMessageId ?? null }
+      : { status: "FAILED", error: result.error },
+  });
+
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Templates                                                                   */
+/* -------------------------------------------------------------------------- */
+
+function signOff(instituteName: string): string {
+  return `\n\n— ${instituteName}`;
+}
+
+export async function queueApplicationNotification(applicationId: string, kind: NotificationKind): Promise<void> {
+  const application = await prisma.application.findUnique({
+    where: { id: applicationId },
+    include: { guardians: { where: { isPrimary: true }, take: 1 } },
+  });
+  if (!application) return;
+
+  const institute = await getInstitute().catch(() => null);
+  const instituteName = institute?.name ?? "the institute";
+  const primaryGuardian = application.guardians[0];
+
+  const messages: Record<string, { subject: string; body: string }> = {
+    APPLICATION_SUBMITTED: {
+      subject: `Application ${application.applicationNo} received`,
+      body:
+        `Dear ${application.fullName},\n\n` +
+        `We have received your admission application. Your application ID is ${application.applicationNo}. ` +
+        `You will hear from us once the review is complete.` +
+        signOff(instituteName),
+    },
+    APPLICATION_STATUS_CHANGE: {
+      subject: `Update on application ${application.applicationNo}`,
+      body:
+        `Dear ${application.fullName},\n\n` +
+        `The status of your application ${application.applicationNo} is now: ${application.status.replaceAll("_", " ").toLowerCase()}.` +
+        (application.decisionReason ? `\n\nRemarks: ${application.decisionReason}` : "") +
+        signOff(instituteName),
+    },
+    APPLICATION_INCOMPLETE: {
+      subject: `Your application is incomplete`,
+      body:
+        `Dear ${application.fullName},\n\n` +
+        `Your admission application is still incomplete. Please contact the admissions office to finish it.` +
+        signOff(instituteName),
+    },
+    DOCUMENTS_PENDING: {
+      subject: `Documents pending for application ${application.applicationNo}`,
+      body:
+        `Dear ${application.fullName},\n\n` +
+        `Some required documents are still pending on your application ${application.applicationNo}.` +
+        signOff(instituteName),
+    },
+  };
+
+  const message = messages[kind];
+  if (!message) return;
+
+  await deliver({
+    kind,
+    applicationId,
+    recipient: {
+      email: application.email ?? primaryGuardian?.email ?? null,
+      phone: application.phone ?? primaryGuardian?.phone ?? null,
+    },
+    subject: message.subject,
+    body: message.body,
+  });
+}
+
+/** Welcome message on enrollment confirmation (spec 1.4 step 9 / 1.6). */
+export async function queueWelcomeNotification(studentId: string): Promise<void> {
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    include: { batch: true, course: true },
+  });
+  if (!student) return;
+
+  const institute = await getInstitute().catch(() => null);
+  const instituteName = institute?.name ?? "the institute";
+
+  await deliver({
+    kind: "WELCOME",
+    studentId,
+    recipient: { email: student.email, phone: student.phone },
+    subject: `Welcome to ${instituteName}`,
+    body:
+      `Dear ${student.fullName},\n\n` +
+      `Your admission is confirmed. Your Student ID is ${student.studentCode}.\n` +
+      `Course: ${student.course.name}\nBatch: ${student.batch.name}\n\n` +
+      `The admissions office will share your login credentials and joining instructions separately.` +
+      signOff(instituteName),
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Fee reminders (spec 3.3)                                                    */
+/* -------------------------------------------------------------------------- */
+
+export async function sendFeeReminder({
+  installmentId,
+  kind,
+  outstandingPaise,
+  lateFeePaise,
+  dueDate,
+}: {
+  installmentId: string;
+  kind: "FEE_PRE_DUE" | "FEE_OVERDUE";
+  outstandingPaise: number;
+  lateFeePaise: number;
+  dueDate: Date;
+}): Promise<{ sent: number; failed: number }> {
+  const installment = await prisma.installment.findUnique({
+    where: { id: installmentId },
+    include: {
+      feeAssignment: {
+        include: {
+          student: { include: { application: { include: { guardians: { where: { isPrimary: true }, take: 1 } } } } },
+        },
+      },
+    },
+  });
+  if (!installment) return { sent: 0, failed: 0 };
+
+  const student = installment.feeAssignment.student;
+  const guardian = student.application.guardians[0];
+  const institute = await getInstitute().catch(() => null);
+  const instituteName = institute?.name ?? "the institute";
+
+  const isPreDue = kind === "FEE_PRE_DUE";
+  const subject = isPreDue
+    ? `Fee due on ${formatDate(dueDate)} — ${student.studentCode}`
+    : `Overdue fee — ${student.studentCode}`;
+
+  const body =
+    `Dear ${student.fullName},\n\n` +
+    (isPreDue
+      ? `This is a reminder that installment ${installment.seqNo} is due on ${formatDate(dueDate)}.\n`
+      : `Installment ${installment.seqNo} was due on ${formatDate(dueDate)} and is still unpaid.\n`) +
+    `Outstanding balance: ${formatPaise(outstandingPaise)}\n` +
+    (lateFeePaise > 0 ? `Late fee accrued: ${formatPaise(lateFeePaise)}\n` : "") +
+    `Total payable: ${formatPaise(outstandingPaise + lateFeePaise)}\n\n` +
+    `Please pay at the accounts office to avoid further late fees.` +
+    signOff(instituteName);
+
+  return deliver({
+    kind,
+    installmentId,
+    studentId: student.id,
+    recipient: {
+      email: student.email ?? guardian?.email ?? null,
+      phone: student.phone ?? guardian?.phone ?? null,
+    },
+    subject,
+    body,
+  });
+}

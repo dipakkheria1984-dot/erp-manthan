@@ -1,0 +1,13 @@
+# Normalise to LF in the repository regardless of the checkout platform, so a
+# Windows working copy does not commit CRLF into files the Linux build reads.
+* text=auto eol=lf
+
+# Vendored fonts and lockfiles must never be line-ending converted.
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+package-lock.json -diff linguist-generated
