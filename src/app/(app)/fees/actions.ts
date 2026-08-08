@@ -9,12 +9,13 @@ import { getConfig } from "@/lib/config";
 import { endOfDay } from "@/lib/dates";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
-import { allocateFifo, refreshInstallment } from "@/lib/late-fees";
+import { allocateFifo, refreshInstallment, refreshInstallmentsBulk } from "@/lib/late-fees";
 import { reinstateProvisionalAdmission, settleProvisionalAdmission } from "@/lib/enrollment";
 import { runReminderPass } from "@/lib/reminders";
 import { formatPaise } from "@/lib/money";
 import { formatSequence, nextSequenceValue, SEQ } from "@/lib/sequence";
 import { dateInput, fieldErrorsOf, formObject, optionalText, reasonInput, requiredText, rupeeAmount } from "@/lib/validation";
+import type { InstallmentStatus } from "@/generated/prisma/client";
 
 const paymentSchema = z.object({
   studentId: requiredText("Student"),
@@ -65,7 +66,7 @@ export async function recordPaymentAction(_prev: unknown, formData: FormData): P
       return fail("This student is no longer active, so their pending fees have been waived.");
     }
 
-    const [installments, slabs, config] = await Promise.all([
+    const [installments, slabs, config, discounts] = await Promise.all([
       prisma.installment.findMany({
         where: { feeAssignment: { studentId } },
         include: { payments: true, feeAssignment: { include: { semester: true } } },
@@ -73,6 +74,12 @@ export async function recordPaymentAction(_prev: unknown, formData: FormData): P
       }),
       prisma.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
       getConfig(),
+      // Read alongside the rest so the installments this collection settles can
+      // be brought up to date without a query each.
+      prisma.discount.findMany({
+        where: { installment: { feeAssignment: { studentId } }, cancelledAt: null },
+        select: { installmentId: true, amountPaise: true },
+      }),
     ]);
 
     const { allocations, unallocatedPaise } = allocateFifo({
@@ -98,27 +105,58 @@ export async function recordPaymentAction(_prev: unknown, formData: FormData): P
     }
 
     const byId = new Map(installments.map((installment) => [installment.id, installment]));
+    const discountByInstallment = new Map<string, number>();
+    for (const discount of discounts) {
+      if (!discount.installmentId) continue;
+      discountByInstallment.set(
+        discount.installmentId,
+        (discountByInstallment.get(discount.installmentId) ?? 0) + discount.amountPaise,
+      );
+    }
 
     const receiptNo = await prisma.$transaction(async (tx) => {
       const seq = await nextSequenceValue(SEQ.RECEIPT, tx);
       const number = formatSequence(config.receiptPrefix, seq, config.receiptPadding);
 
-      for (const [index, allocation] of allocations.entries()) {
-        await tx.payment.create({
-          data: {
-            receiptNo: number,
-            receiptSeq: index + 1,
-            kind: "INSTALLMENT",
-            installmentId: allocation.installmentId,
-            studentId,
+      await tx.payment.createMany({
+        data: allocations.map((allocation, index) => ({
+          receiptNo: number,
+          receiptSeq: index + 1,
+          kind: "INSTALLMENT" as const,
+          installmentId: allocation.installmentId,
+          studentId,
+          amountPaise: allocation.amountPaise,
+          lateFeePortionPaise: allocation.lateFeePortionPaise,
+          collectedById: actor.id,
+          ...rest,
+        })),
+      });
+
+      // Fold the allocations into the copies already in hand and write the
+      // resulting states together. A collection reaching a dozen installments
+      // used to be six round trips each, inside the transaction.
+      await refreshInstallmentsBulk(
+        allocations.flatMap((allocation) => {
+          const installment = byId.get(allocation.installmentId);
+          if (!installment) return [];
+          installment.payments.push({
+            status: "ACTIVE",
             amountPaise: allocation.amountPaise,
             lateFeePortionPaise: allocation.lateFeePortionPaise,
-            collectedById: actor.id,
-            ...rest,
-          },
-        });
-        await refreshInstallment(allocation.installmentId, tx, rest.paymentDate);
-      }
+          } as (typeof installment.payments)[number]);
+          return [
+            {
+              installment,
+              asOf: rest.paymentDate,
+              lateFeeExempt: student.application.isProvisional,
+              discountPaise: discountByInstallment.get(allocation.installmentId) ?? 0,
+            },
+          ];
+        }),
+        slabs,
+        config,
+        tx,
+      );
 
       const breakdown = allocations
         .map((allocation) => {
@@ -224,10 +262,47 @@ export async function cancelReceiptAction(_prev: unknown, formData: FormData): P
         wentProvisional = wentProvisional || result.reinstated;
       }
 
-      for (const line of lines) {
-        if (!line.installmentId) continue;
-        // Recalculates status and re-assesses late fee against the original due date.
-        await refreshInstallment(line.installmentId, tx);
+      // Recalculates status and re-assesses late fees against the original due
+      // dates. The rows are re-read once, *after* the cancellations and any
+      // provisional reinstatement above, so the payments they carry are the
+      // surviving ones and the exemption is the one now in force.
+      const touched = [...new Set(lines.map((line) => line.installmentId).filter((id): id is string => Boolean(id)))];
+      if (touched.length > 0) {
+        const [affected, slabs, config, discounts] = await Promise.all([
+          tx.installment.findMany({
+            where: { id: { in: touched } },
+            include: {
+              payments: true,
+              feeAssignment: { select: { student: { select: { application: { select: { isProvisional: true } } } } } },
+            },
+          }),
+          tx.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
+          getConfig(tx),
+          tx.discount.findMany({
+            where: { installmentId: { in: touched }, cancelledAt: null },
+            select: { installmentId: true, amountPaise: true },
+          }),
+        ]);
+        const discountByInstallment = new Map<string, number>();
+        for (const discount of discounts) {
+          if (!discount.installmentId) continue;
+          discountByInstallment.set(
+            discount.installmentId,
+            (discountByInstallment.get(discount.installmentId) ?? 0) + discount.amountPaise,
+          );
+        }
+        const now = new Date();
+        await refreshInstallmentsBulk(
+          affected.map((installment) => ({
+            installment,
+            asOf: now,
+            lateFeeExempt: installment.feeAssignment.student.application.isProvisional,
+            discountPaise: discountByInstallment.get(installment.id) ?? 0,
+          })),
+          slabs,
+          config,
+          tx,
+        );
       }
 
       await recordAuditTx(tx, {
@@ -274,14 +349,49 @@ export async function recalculateLateFeesAction(
 ): Promise<ActionResult<{ updated: number }>> {
   return runAction(async () => {
     const actor = await assertPermission(PERMISSIONS.INSTITUTE_MANAGE);
-    const open = await prisma.installment.findMany({
-      where: { status: { in: ["PENDING", "PARTIALLY_PAID"] } },
-      select: { id: true },
-    });
 
-    for (const installment of open) {
-      await refreshInstallment(installment.id);
+    // Every open installment in the institute, so this is the one place where a
+    // call per row is unbounded — it grew with the roll and would eventually
+    // outlast the request. Four reads, then the writes grouped by outcome.
+    const openStatuses: InstallmentStatus[] = ["PENDING", "PARTIALLY_PAID"];
+    const [open, slabs, config, discounts] = await Promise.all([
+      prisma.installment.findMany({
+        where: { status: { in: openStatuses } },
+        include: {
+          payments: true,
+          feeAssignment: {
+            select: { student: { select: { application: { select: { isProvisional: true } } } } },
+          },
+        },
+      }),
+      prisma.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
+      getConfig(),
+      prisma.discount.findMany({
+        where: { installment: { is: { status: { in: openStatuses } } }, cancelledAt: null },
+        select: { installmentId: true, amountPaise: true },
+      }),
+    ]);
+
+    const discountByInstallment = new Map<string, number>();
+    for (const discount of discounts) {
+      if (!discount.installmentId) continue;
+      discountByInstallment.set(
+        discount.installmentId,
+        (discountByInstallment.get(discount.installmentId) ?? 0) + discount.amountPaise,
+      );
     }
+
+    const asOf = new Date();
+    await refreshInstallmentsBulk(
+      open.map((installment) => ({
+        installment,
+        asOf,
+        lateFeeExempt: installment.feeAssignment.student.application.isProvisional,
+        discountPaise: discountByInstallment.get(installment.id) ?? 0,
+      })),
+      slabs,
+      config,
+    );
 
     await recordAudit({
       userId: actor.id,

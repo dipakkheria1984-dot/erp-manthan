@@ -238,6 +238,74 @@ export async function refreshInstallment(
   return balance;
 }
 
+export type InstallmentRefresh = {
+  /** The installment with its payments — including any just applied in memory. */
+  installment: InstallmentWithPayments;
+  /** The date the late fee is assessed as of; a payment's own date, usually. */
+  asOf: Date;
+  lateFeeExempt: boolean;
+  /** Live discount total. Falls back to the value cached on the row. */
+  discountPaise?: number;
+};
+
+/**
+ * Persist what `refreshInstallment` would compute, for several installments at
+ * once.
+ *
+ * `refreshInstallment` re-reads the slabs, the config and the discounts on
+ * every call, so using it in a loop is four or five round trips per
+ * installment. Anywhere a single act touches many — one collection spread
+ * across installments, an imported register, a cancelled receipt — that is what
+ * exhausts the transaction budget. Here the caller has already worked the
+ * balances out in memory, so the only cost is the writes, and rows sharing an
+ * outcome (most simply end up PAID) go in one statement.
+ *
+ * A waived installment keeps its status until Admin un-waives it, exactly as it
+ * does in the single-row version.
+ */
+export async function refreshInstallmentsBulk(
+  entries: InstallmentRefresh[],
+  slabs: LateFeeSlab[],
+  config: LateFeeConfig,
+  db: Db = prisma,
+): Promise<number> {
+  const grouped = new Map<string, string[]>();
+
+  for (const entry of entries) {
+    if (entry.installment.status === "WAIVED") continue;
+    const discountPaise = Math.min(
+      Math.max(0, entry.discountPaise ?? entry.installment.discountPaise),
+      entry.installment.amountPaise,
+    );
+    const balance = balanceOf(
+      { ...entry.installment, discountPaise },
+      slabs,
+      config,
+      entry.asOf,
+      entry.lateFeeExempt,
+    );
+    const key = `${balance.status}|${balance.lateFeeAssessedPaise}|${discountPaise}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), entry.installment.id]);
+  }
+
+  const lateFeeUpdatedAt = new Date();
+  let updated = 0;
+  for (const [key, ids] of grouped) {
+    const [status, lateFeePaise, discountPaise] = key.split("|");
+    await db.installment.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: status as InstallmentBalance["status"],
+        discountPaise: Number(discountPaise),
+        lateFeePaise: Number(lateFeePaise),
+        lateFeeUpdatedAt,
+      },
+    });
+    updated += ids.length;
+  }
+  return updated;
+}
+
 /**
  * Spread one amount over installments oldest-due-first (FIFO). Within each
  * installment the outstanding late fee is settled before principal, exactly as

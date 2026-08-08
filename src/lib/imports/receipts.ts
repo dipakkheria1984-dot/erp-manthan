@@ -4,7 +4,7 @@ import { getConfig } from "@/lib/config";
 import { ValidationError } from "@/lib/errors";
 import { formatPaise, rupeesToPaise } from "@/lib/money";
 import { endOfDay, formatDate } from "@/lib/dates";
-import { allocateFifo, balanceOf } from "@/lib/late-fees";
+import { allocateFifo, refreshInstallmentsBulk } from "@/lib/late-fees";
 import { settleProvisionalAdmission } from "@/lib/enrollment";
 import { recordAuditTx } from "@/lib/audit";
 import { formatSequence, nextSequenceBlock, SEQ } from "@/lib/sequence";
@@ -628,44 +628,26 @@ export async function commitReceiptImport(preview: ReceiptPreview, actorId: stri
         await tx.payment.createMany({ data: batch });
       }
 
-      /*
-       * The state `refreshInstallment` would have left on each installment it
-       * touched, worked out from the copy already in hand. Rows sharing an
-       * outcome — and most end up simply PAID — are written together, so a file
-       * of any size costs a handful of statements rather than one per
-       * allocation.
-       */
-      const updates = new Map<string, string[]>();
-      for (const [installmentId, asOf] of settledAt) {
-        const installment = workingById.get(installmentId);
-        if (!installment) continue;
-        // A waived installment keeps its status until Admin un-waives it.
-        if (installment.status === "WAIVED") continue;
-        const student = studentById.get(studentIdByInstallment.get(installmentId) ?? "");
-        const discountPaise = Math.min(liveDiscountPaise.get(installmentId) ?? 0, installment.amountPaise);
-        const balance = balanceOf(
-          { ...installment, discountPaise },
-          slabs,
-          config,
-          asOf,
-          student?.application.isProvisional ?? false,
-        );
-        const key = `${balance.status}|${balance.lateFeeAssessedPaise}|${discountPaise}`;
-        updates.set(key, [...(updates.get(key) ?? []), installmentId]);
-      }
-      const stampedAt = new Date();
-      for (const [key, ids] of updates) {
-        const [status, lateFeePaise, discountPaise] = key.split("|");
-        await tx.installment.updateMany({
-          where: { id: { in: ids } },
-          data: {
-            status: status as WorkingInstallment["status"],
-            discountPaise: Number(discountPaise),
-            lateFeePaise: Number(lateFeePaise),
-            lateFeeUpdatedAt: stampedAt,
-          },
-        });
-      }
+      // The states `refreshInstallment` would have left, from the copies
+      // already in hand — see `refreshInstallmentsBulk`.
+      await refreshInstallmentsBulk(
+        [...settledAt].flatMap(([installmentId, asOf]) => {
+          const installment = workingById.get(installmentId);
+          if (!installment) return [];
+          const student = studentById.get(studentIdByInstallment.get(installmentId) ?? "");
+          return [
+            {
+              installment,
+              asOf,
+              lateFeeExempt: student?.application.isProvisional ?? false,
+              discountPaise: liveDiscountPaise.get(installmentId) ?? 0,
+            },
+          ];
+        }),
+        slabs,
+        config,
+        tx,
+      );
 
       await recordAuditTx(tx, {
         userId: actorId,
