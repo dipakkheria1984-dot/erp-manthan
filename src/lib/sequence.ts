@@ -25,6 +25,31 @@ export async function nextSequenceValue(key: string, db: Db = prisma): Promise<n
   return rows[0].nextValue;
 }
 
+/**
+ * Claim `count` consecutive values of a counter at once, returned in order.
+ *
+ * A receipt import needs a number for every row that did not bring one of its
+ * own. Asking `nextSequenceValue` per row is a round trip each, and on a hosted
+ * database those are what push a large import past its transaction budget. The
+ * single `UPDATE ... RETURNING` serialises on the row exactly as the one-at-a-
+ * time version does, so a concurrent collection cannot be handed the same
+ * number.
+ */
+export async function nextSequenceBlock(key: string, count: number, db: Db = prisma): Promise<number[]> {
+  if (count < 1) return [];
+
+  const rows = await db.$queryRaw<{ firstValue: number }[]>`
+    INSERT INTO "Sequence" ("key", "nextValue", "updatedAt")
+    VALUES (${key}, ${count + 1}, NOW())
+    ON CONFLICT ("key") DO UPDATE
+      SET "nextValue" = "Sequence"."nextValue" + ${count},
+          "updatedAt" = NOW()
+    RETURNING "nextValue" - ${count} AS "firstValue"
+  `;
+  const first = rows[0].firstValue;
+  return Array.from({ length: count }, (_, i) => first + i);
+}
+
 export function formatSequence(prefix: string, value: number, padding: number): string {
   return `${prefix}${String(value).padStart(padding, "0")}`;
 }

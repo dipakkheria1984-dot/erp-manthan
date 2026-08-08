@@ -4,10 +4,10 @@ import { getConfig } from "@/lib/config";
 import { ValidationError } from "@/lib/errors";
 import { formatPaise, rupeesToPaise } from "@/lib/money";
 import { endOfDay, formatDate } from "@/lib/dates";
-import { allocateFifo, refreshInstallment } from "@/lib/late-fees";
+import { allocateFifo, balanceOf } from "@/lib/late-fees";
 import { settleProvisionalAdmission } from "@/lib/enrollment";
 import { recordAuditTx } from "@/lib/audit";
-import { formatSequence, nextSequenceValue, SEQ } from "@/lib/sequence";
+import { formatSequence, nextSequenceBlock, SEQ } from "@/lib/sequence";
 import {
   mapHeaders,
   parseDate,
@@ -215,8 +215,68 @@ export async function prepareReceiptImport(
     return timeA === timeB ? a - b : timeA - timeB;
   });
 
+  /*
+   * Everything the rows are checked against is read up front, in a fixed
+   * handful of queries. Looking each row up on its own was two round trips per
+   * row plus one per student, run twice over — once for the preview and again
+   * to re-validate at commit — which on a hosted database is most of the time a
+   * large file takes.
+   */
+  const roll = await db.student.findMany({
+    select: {
+      id: true,
+      studentCode: true,
+      lfNo: true,
+      status: true,
+      applicationId: true,
+      application: { select: { isProvisional: true, fullName: true } },
+    },
+  });
+  const studentByCode = new Map(roll.map((s) => [s.studentCode.toUpperCase(), s]));
+  const studentByLfNo = new Map(roll.map((s) => [s.lfNo, s]));
+
+  const findStudent = (ref: string) => {
+    const byCode = studentByCode.get(ref.toUpperCase());
+    if (byCode) return byCode;
+    const lfNo = Number(ref.replace(/[,\s]/g, ""));
+    return Number.isInteger(lfNo) ? studentByLfNo.get(lfNo) : undefined;
+  };
+
+  const usedReceiptNos = new Set(
+    (
+      await db.payment.findMany({
+        where: {
+          receiptNo: {
+            in: [...new Set(parsed.map((row) => row.get("receiptNo")).filter((v): v is string => Boolean(v)))],
+          },
+        },
+        select: { receiptNo: true },
+      })
+    ).map((payment) => payment.receiptNo),
+  );
+
+  // Every installment belonging to a student the file mentions, in one read.
+  const referencedIds = [
+    ...new Set(
+      parsed
+        .map((row) => row.get("studentCode"))
+        .filter((ref): ref is string => Boolean(ref))
+        .map((ref) => findStudent(ref)?.id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const installmentRows = await db.installment.findMany({
+    where: { feeAssignment: { studentId: { in: referencedIds } } },
+    include: { payments: true, feeAssignment: { select: { studentId: true } } },
+    orderBy: [{ dueDate: "asc" }, { seqNo: "asc" }],
+  });
+
   const rowsByIndex = new Map<number, ReceiptRow>();
   const workingByStudent = new Map<string, WorkingInstallment[]>();
+  for (const id of referencedIds) workingByStudent.set(id, []);
+  for (const installment of installmentRows) {
+    workingByStudent.get(installment.feeAssignment.studentId)?.push(installment as WorkingInstallment);
+  }
   const exemptByStudent = new Map<string, boolean>();
   const seenReceiptNos = new Set<string>();
   let totalPaise = 0;
@@ -239,22 +299,7 @@ export async function prepareReceiptImport(
     if (!studentRef) {
       errors.push({ field: "studentCode", message: "Student ID is required." });
     } else {
-      const lfNo = Number(studentRef.replace(/[,\s]/g, ""));
-      const found = await db.student.findFirst({
-        where: {
-          OR: [
-            { studentCode: { equals: studentRef, mode: "insensitive" } },
-            ...(Number.isInteger(lfNo) ? [{ lfNo }] : []),
-          ],
-        },
-        select: {
-          id: true,
-          studentCode: true,
-          status: true,
-          applicationId: true,
-          application: { select: { isProvisional: true, fullName: true } },
-        },
-      });
+      const found = findStudent(studentRef);
       if (!found) {
         errors.push({ field: "studentCode", message: `No student with ID or LF No "${studentRef}".` });
       } else if (found.status !== "ACTIVE" && found.status !== "PASSED") {
@@ -313,25 +358,16 @@ export async function prepareReceiptImport(
     if (receiptNo) {
       if (seenReceiptNos.has(receiptNo.toUpperCase())) {
         errors.push({ field: "receiptNo", message: `Receipt number ${receiptNo} appears more than once in this file.` });
-      } else {
-        const clash = await db.payment.findFirst({ where: { receiptNo }, select: { id: true } });
-        if (clash) errors.push({ field: "receiptNo", message: `Receipt number ${receiptNo} is already used in this system.` });
+      } else if (usedReceiptNos.has(receiptNo)) {
+        errors.push({ field: "receiptNo", message: `Receipt number ${receiptNo} is already used in this system.` });
       }
     }
 
     let allocations: ResolvedReceipt["allocations"] = [];
 
     if (student && typeof amount === "number" && paymentDate instanceof Date && mode && errors.length === 0) {
-      let working = workingByStudent.get(student.id);
-      if (!working) {
-        working = (await db.installment.findMany({
-          where: { feeAssignment: { studentId: student.id } },
-          include: { payments: true },
-          orderBy: [{ dueDate: "asc" }, { seqNo: "asc" }],
-        })) as WorkingInstallment[];
-        workingByStudent.set(student.id, working);
-        exemptByStudent.set(student.id, student.isProvisional);
-      }
+      const working = workingByStudent.get(student.id) ?? [];
+      exemptByStudent.set(student.id, student.isProvisional);
 
       const amountPaise = rupeesToPaise(amount);
       const result = allocateFifo({
@@ -433,10 +469,26 @@ export async function prepareReceiptImport(
 
 export type ReceiptOutcome = { created: number; skipped: number; totalPaise: number; receiptNos: string[] };
 
+const WRITE_CHUNK = 500;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 /**
  * Writes the valid rows. Each is re-allocated against the live database in
  * payment-date order, exactly as recording them one at a time would, so the
  * installment statuses and late fees end up identical.
+ *
+ * The re-allocation runs against one in-memory copy of the affected
+ * installments — the same technique the preview uses so that several rows
+ * paying the same student see each other. Reading them back per row, and
+ * calling `refreshInstallment` per allocation on top of that, was six or more
+ * round trips for every row in the file; a large register spent its whole
+ * transaction budget on them and rolled the import back with nothing written.
+ * Everything is read once, settled in memory, and written in bulk.
  */
 export async function commitReceiptImport(preview: ReceiptPreview, actorId: string): Promise<ReceiptOutcome> {
   const valid = preview.rows
@@ -450,26 +502,79 @@ export async function commitReceiptImport(preview: ReceiptPreview, actorId: stri
   const receiptNos: string[] = [];
   let totalPaise = 0;
 
-  const studentIds = new Set<string>();
+  const studentIds = [...new Set(valid.map((entry) => entry.studentId))];
 
   await prisma.$transaction(
     async (tx) => {
-      const slabs = await tx.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } });
+      const [slabs, students, installmentRows, discounts] = await Promise.all([
+        tx.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
+        tx.student.findMany({
+          where: { id: { in: studentIds } },
+          select: { id: true, studentCode: true, application: { select: { isProvisional: true } } },
+        }),
+        tx.installment.findMany({
+          where: { feeAssignment: { studentId: { in: studentIds } } },
+          include: { payments: true, feeAssignment: { select: { studentId: true } } },
+          orderBy: [{ dueDate: "asc" }, { seqNo: "asc" }],
+        }),
+        // `refreshInstallment` re-derived the cached discount from the live rows
+        // every time it ran, repairing it if it had drifted. Reading them once
+        // keeps that guarantee without a query per allocation.
+        tx.discount.findMany({
+          where: { installment: { feeAssignment: { studentId: { in: studentIds } } }, cancelledAt: null },
+          select: { installmentId: true, amountPaise: true },
+        }),
+      ]);
+
+      const liveDiscountPaise = new Map<string, number>();
+      for (const discount of discounts) {
+        if (!discount.installmentId) continue;
+        liveDiscountPaise.set(
+          discount.installmentId,
+          (liveDiscountPaise.get(discount.installmentId) ?? 0) + discount.amountPaise,
+        );
+      }
+
+      const studentById = new Map(students.map((student) => [student.id, student]));
+      const workingByStudent = new Map<string, WorkingInstallment[]>();
+      const workingById = new Map<string, WorkingInstallment>();
+      const studentIdByInstallment = new Map<string, string>();
+      for (const id of studentIds) workingByStudent.set(id, []);
+      for (const installment of installmentRows) {
+        workingByStudent.get(installment.feeAssignment.studentId)?.push(installment);
+        workingById.set(installment.id, installment);
+        studentIdByInstallment.set(installment.id, installment.feeAssignment.studentId);
+      }
+
+      // Every number the file did not bring, claimed in one statement.
+      const needingNumbers = valid.filter((entry) => entry.receiptNo === null).length;
+      const claimed = await nextSequenceBlock(SEQ.RECEIPT, needingNumbers, tx);
+      let nextClaimed = 0;
+
+      const payments: {
+        receiptNo: string;
+        receiptSeq: number;
+        kind: "INSTALLMENT";
+        installmentId: string;
+        studentId: string;
+        amountPaise: number;
+        lateFeePortionPaise: number;
+        paymentDate: Date;
+        mode: PaymentMode;
+        referenceNo: string | null;
+        remarks: string | null;
+        collectedById: string;
+      }[] = [];
+      /** Latest payment date applied to each installment — what its late fee is assessed as of. */
+      const settledAt = new Map<string, Date>();
 
       for (const entry of valid) {
-        const student = await tx.student.findUniqueOrThrow({
-          where: { id: entry.studentId },
-          select: { studentCode: true, application: { select: { isProvisional: true } } },
-        });
-
-        const installments = await tx.installment.findMany({
-          where: { feeAssignment: { studentId: entry.studentId } },
-          include: { payments: true },
-          orderBy: [{ dueDate: "asc" }, { seqNo: "asc" }],
-        });
+        const student = studentById.get(entry.studentId);
+        if (!student) throw new ValidationError("A student in this file no longer exists. Re-check the file.");
+        const working = workingByStudent.get(entry.studentId) ?? [];
 
         const { allocations, unallocatedPaise } = allocateFifo({
-          installments,
+          installments: working,
           amountPaise: entry.amountPaise,
           slabs,
           config,
@@ -486,31 +591,80 @@ export async function commitReceiptImport(preview: ReceiptPreview, actorId: stri
 
         const number =
           entry.receiptNo ??
-          formatSequence(config.receiptPrefix, await nextSequenceValue(SEQ.RECEIPT, tx), config.receiptPadding);
+          formatSequence(config.receiptPrefix, claimed[nextClaimed++], config.receiptPadding);
 
         for (const [i, allocation] of allocations.entries()) {
-          await tx.payment.create({
-            data: {
-              receiptNo: number,
-              receiptSeq: i + 1,
-              kind: "INSTALLMENT",
-              installmentId: allocation.installmentId,
-              studentId: entry.studentId,
-              amountPaise: allocation.amountPaise,
-              lateFeePortionPaise: allocation.lateFeePortionPaise,
-              paymentDate: entry.paymentDate,
-              mode: entry.mode,
-              referenceNo: entry.referenceNo,
-              remarks: entry.remarks,
-              collectedById: actorId,
-            },
+          payments.push({
+            receiptNo: number,
+            receiptSeq: i + 1,
+            kind: "INSTALLMENT",
+            installmentId: allocation.installmentId,
+            studentId: entry.studentId,
+            amountPaise: allocation.amountPaise,
+            lateFeePortionPaise: allocation.lateFeePortionPaise,
+            paymentDate: entry.paymentDate,
+            mode: entry.mode,
+            referenceNo: entry.referenceNo,
+            remarks: entry.remarks,
+            collectedById: actorId,
           });
-          await refreshInstallment(allocation.installmentId, tx, entry.paymentDate);
+          settledAt.set(allocation.installmentId, entry.paymentDate);
+
+          // Fold it into the working copy, so a later row paying the same
+          // student sees the reduced balance — exactly as the preview does.
+          const installment = working.find((item) => item.id === allocation.installmentId);
+          installment?.payments.push({
+            status: "ACTIVE",
+            amountPaise: allocation.amountPaise,
+            lateFeePortionPaise: allocation.lateFeePortionPaise,
+          } as Payment);
         }
 
         receiptNos.push(number);
         totalPaise += entry.amountPaise;
-        studentIds.add(entry.studentId);
+      }
+
+      for (const batch of chunk(payments, WRITE_CHUNK)) {
+        await tx.payment.createMany({ data: batch });
+      }
+
+      /*
+       * The state `refreshInstallment` would have left on each installment it
+       * touched, worked out from the copy already in hand. Rows sharing an
+       * outcome — and most end up simply PAID — are written together, so a file
+       * of any size costs a handful of statements rather than one per
+       * allocation.
+       */
+      const updates = new Map<string, string[]>();
+      for (const [installmentId, asOf] of settledAt) {
+        const installment = workingById.get(installmentId);
+        if (!installment) continue;
+        // A waived installment keeps its status until Admin un-waives it.
+        if (installment.status === "WAIVED") continue;
+        const student = studentById.get(studentIdByInstallment.get(installmentId) ?? "");
+        const discountPaise = Math.min(liveDiscountPaise.get(installmentId) ?? 0, installment.amountPaise);
+        const balance = balanceOf(
+          { ...installment, discountPaise },
+          slabs,
+          config,
+          asOf,
+          student?.application.isProvisional ?? false,
+        );
+        const key = `${balance.status}|${balance.lateFeeAssessedPaise}|${discountPaise}`;
+        updates.set(key, [...(updates.get(key) ?? []), installmentId]);
+      }
+      const stampedAt = new Date();
+      for (const [key, ids] of updates) {
+        const [status, lateFeePaise, discountPaise] = key.split("|");
+        await tx.installment.updateMany({
+          where: { id: { in: ids } },
+          data: {
+            status: status as WorkingInstallment["status"],
+            discountPaise: Number(discountPaise),
+            lateFeePaise: Number(lateFeePaise),
+            lateFeeUpdatedAt: stampedAt,
+          },
+        });
       }
 
       await recordAuditTx(tx, {
@@ -524,10 +678,16 @@ export async function commitReceiptImport(preview: ReceiptPreview, actorId: stri
   );
 
   // Installment 1 carries the registration money, so a settled first installment
-  // confirms a provisional admission — same as a single collection does.
-  for (const studentId of studentIds) {
-    const student = await prisma.student.findUnique({ where: { id: studentId }, select: { applicationId: true } });
-    if (student) await settleProvisionalAdmission(student.applicationId, actorId);
+  // confirms a provisional admission — same as a single collection does. Only
+  // the provisional ones have anything to settle, and looking that up once
+  // keeps a file naming hundreds of students from spending a round trip each on
+  // students whose admission was confirmed long ago.
+  const provisional = await prisma.student.findMany({
+    where: { id: { in: studentIds }, application: { isProvisional: true } },
+    select: { applicationId: true },
+  });
+  for (const student of provisional) {
+    await settleProvisionalAdmission(student.applicationId, actorId);
   }
 
   return {
