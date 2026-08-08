@@ -8,8 +8,8 @@ import { assertPermission } from "@/lib/auth";
 import { recordAuditTx } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
-import { balanceOf, refreshInstallment } from "@/lib/late-fees";
-import { buildInstallmentPlan, validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
+import { balanceOf, chargeableDaysOverdue, computeLateFee, refreshInstallment } from "@/lib/late-fees";
+import { validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
 import { formatDate, fromDateInput, startOfDay } from "@/lib/dates";
 import { formatPaise, percentOf, rupeesToPaise } from "@/lib/money";
 import {
@@ -17,7 +17,6 @@ import {
   dateInput,
   fieldErrorsOf,
   formObject,
-  intInput,
   optionalDateInput,
   optionalIntInput,
   optionalRupeeAmount,
@@ -408,8 +407,8 @@ const assignFeeSchema = z.object({
   scholarshipAmount: optionalRupeeAmount("Scholarship amount"),
   examFee: optionalRupeeAmount("Exam fee"),
   activityFee: optionalRupeeAmount("Activity fee"),
-  installmentCount: intInput("Installments", { min: 1, max: 60 }),
-  firstDueDate: dateInput("First installment due date"),
+  /// Same JSON the edit screen posts: [{ dueDate: "yyyy-MM-dd", amount: "1234.00" }].
+  rows: requiredText("Installments"),
   note: optionalText,
 });
 
@@ -425,15 +424,20 @@ const assignFeeSchema = z.object({
  * Due, nothing to collect against — and no way to put that right from the
  * record. This is that way.
  *
- * It creates the assignment and generates its schedule the same way enrollment
- * and promotion do, so what it produces is indistinguishable from a fee
- * assigned by either. Editing it afterwards is the existing "Edit assigned fee"
- * screen; this only fills a gap, and refuses a semester that already has one.
+ * The installments arrive as a plan the user has laid out row by row, held to
+ * the same rules the enrollment step and the edit screen enforce: they must add
+ * up to the fee, run in date order, and finish on or before the batch
+ * completion date. What it produces is indistinguishable from a fee assigned by
+ * approval or a promotion run. Editing it afterwards is the existing "Edit
+ * assigned fee" screen; this only fills a gap, and refuses a semester that
+ * already has one.
  *
- * Back-dated first due dates are expected here — a migrated student is usually
+ * Back-dated due dates are expected here — a migrated student is usually
  * part-way through the semester being billed — so installments already past
- * their date are brought up to date immediately rather than waiting for the
- * nightly job to notice them.
+ * their date carry their late fee from the moment they are written rather than
+ * waiting for the nightly job to notice them. That fee is worked out in memory
+ * from one read of the slabs: calling `refreshInstallment` per row was several
+ * round trips each, which is what put this over the transaction's budget.
  */
 export async function assignSemesterFeeAction(
   _prev: unknown,
@@ -444,7 +448,9 @@ export async function assignSemesterFeeAction(
     const parsed = assignFeeSchema.safeParse(formObject(formData));
     if (!parsed.success) return fail("Please correct the highlighted fields.", fieldErrorsOf(parsed.error));
 
-    const { studentId, semesterId, scholarshipBasis, installmentCount, firstDueDate, note } = parsed.data;
+    const { studentId, semesterId, scholarshipBasis, note } = parsed.data;
+    const planned = parsePlanRows(parsed.data.rows);
+    if ("error" in planned) return fail(planned.error, { rows: [planned.error] });
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
@@ -454,6 +460,8 @@ export async function assignSemesterFeeAction(
         status: true,
         batchId: true,
         batch: { select: { code: true, completionDate: true } },
+        // Late fee never accrues while an admission is provisional (spec 3.2).
+        application: { select: { isProvisional: true } },
       },
     });
     if (!student) return fail("Student not found.");
@@ -485,16 +493,6 @@ export async function assignSemesterFeeAction(
     }
 
     const config = await getConfig();
-    if (installmentCount < config.installmentMin || installmentCount > config.installmentMax) {
-      return fail(`Installments must be between ${config.installmentMin} and ${config.installmentMax}.`, {
-        installmentCount: [`Allowed range is ${config.installmentMin}–${config.installmentMax}.`],
-      });
-    }
-    if (firstDueDate > student.batch.completionDate) {
-      return fail(`Batch ${student.batch.code} completes on ${formatDate(student.batch.completionDate)}.`, {
-        firstDueDate: ["Must be on or before the batch completion date."],
-      });
-    }
 
     // A flat concession can never exceed the tuition it is discounting; the two
     // ways of quoting one are mutually exclusive, exactly as at enrollment.
@@ -513,12 +511,48 @@ export async function assignSemesterFeeAction(
       );
     }
 
-    const plan = buildInstallmentPlan({
+    const plan: InstallmentDraft[] = planned.rows.map((row, index) => ({
+      seqNo: index + 1,
+      dueDate: row.dueDate,
+      amountPaise: row.amountPaise,
+    }));
+    const problem = validateInstallmentPlan({
+      rows: plan,
       totalPayablePaise,
-      count: installmentCount,
-      firstDueDate,
       completionDate: student.batch.completionDate,
+      minCount: config.installmentMin,
+      maxCount: config.installmentMax,
     });
+    if (problem) return fail(problem, { rows: [problem] });
+
+    // Everything the late fee depends on, read once outside the transaction:
+    // these are policy tables, and a round trip per installment inside it is
+    // what made this time out.
+    const slabs = await prisma.lateFeeSlab.findMany({
+      where: { isActive: true },
+      orderBy: { minDaysOverdue: "asc" },
+    });
+    const now = new Date();
+    const exempt = student.application.isProvisional;
+
+    /**
+     * A brand-new installment carries no payments and no discounts, so its
+     * balance reduces to the slab that its lateness selects — no read needed.
+     * One that is not yet due lands on zero and needs no write at all, since
+     * that is what the column defaults to.
+     */
+    const lateFeeFor = (dueDate: Date, amountPaise: number): number =>
+      exempt
+        ? 0
+        : computeLateFee({
+            slabs,
+            config,
+            daysPastDue: chargeableDaysOverdue(dueDate, now, config.lateFeeEffectiveFrom),
+            principalOutstandingPaise: amountPaise,
+          });
+
+    let backdated = 0;
+    let lateFeeTotalPaise = 0;
 
     await prisma.$transaction(async (tx) => {
       const assignment = await tx.feeAssignment.create({
@@ -539,19 +573,28 @@ export async function assignSemesterFeeAction(
         },
       });
 
-      await tx.installment.createMany({
+      const written = await tx.installment.createManyAndReturn({
+        select: { id: true, dueDate: true, amountPaise: true },
         data: plan.map((item) => ({ ...item, feeAssignmentId: assignment.id })),
       });
 
-      // Only the ones already past their date need it — a future installment is
-      // created PENDING with no late fee, which is what it should be.
-      const alreadyDue = await tx.installment.findMany({
-        where: { feeAssignmentId: assignment.id, dueDate: { lt: startOfDay(new Date()) } },
-        select: { id: true },
-      });
-      for (const installment of alreadyDue) {
-        await refreshInstallment(installment.id, tx);
+      // Group the back-dated rows by the fee they attract, so a plan of any
+      // length costs at most one statement per distinct slab amount — and
+      // nothing at all when none of them is chargeable yet.
+      const byLateFee = new Map<number, string[]>();
+      for (const installment of written) {
+        const paise = lateFeeFor(installment.dueDate, installment.amountPaise);
+        if (paise <= 0) continue;
+        byLateFee.set(paise, [...(byLateFee.get(paise) ?? []), installment.id]);
       }
+      for (const [lateFeePaise, ids] of byLateFee) {
+        await tx.installment.updateMany({
+          where: { id: { in: ids } },
+          data: { lateFeePaise, lateFeeUpdatedAt: now },
+        });
+      }
+      backdated = written.filter((installment) => installment.dueDate < startOfDay(now)).length;
+      lateFeeTotalPaise = [...byLateFee].reduce((sum, [paise, ids]) => sum + paise * ids.length, 0);
 
       await recordAuditTx(tx, {
         userId: actor.id,
@@ -573,10 +616,16 @@ export async function assignSemesterFeeAction(
           installmentCount: plan.length,
           firstDueDate: plan[0].dueDate,
           lastDueDate: plan[plan.length - 1].dueDate,
-          backdatedInstallments: alreadyDue.length,
+          backdatedInstallments: backdated,
+          lateFeeAssessedPaise: lateFeeTotalPaise,
         },
       });
-    });
+    },
+    // A handful of statements, but every one is a round trip to a hosted
+    // database. Prisma's 5s default left no room for a slow link, which is what
+    // made this fail in production.
+    { timeout: 20_000 },
+  );
 
     revalidatePath(`/students/${studentId}`);
     revalidatePath("/students");
@@ -586,7 +635,12 @@ export async function assignSemesterFeeAction(
     return ok(
       undefined,
       `${formatPaise(totalPayablePaise)} assigned for semester ${semester.semesterNumber} over ${plan.length} ` +
-        `installment(s), first due ${formatDate(plan[0].dueDate)}. It is collectible now and appears in Fee Due.`,
+        `installment(s), first due ${formatDate(plan[0].dueDate)}. It is collectible now and appears in Fee Due.` +
+        (backdated > 0
+          ? ` ${backdated} installment(s) were already past their due date${
+              lateFeeTotalPaise > 0 ? ` and carry ${formatPaise(lateFeeTotalPaise)} in late fees` : ""
+            }.`
+          : ""),
     );
   });
 }

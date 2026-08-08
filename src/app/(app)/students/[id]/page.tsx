@@ -237,6 +237,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
                 installmentMax={config.installmentMax}
                 defaultInstallmentCount={defaultInstallmentCount}
                 defaultFirstDueDate={toDateInput(today)}
+                completionDate={toDateInput(student.batch.completionDate)}
                 completionDateLabel={formatDate(student.batch.completionDate)}
               />
             ) : null}

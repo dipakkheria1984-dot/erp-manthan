@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { ActionForm, Modal, ReasonActionButton, SubmitButton, fieldError } from "@/components/form";
-import { Alert, Button, Field, Input, Select, Textarea } from "@/components/ui";
+import { Alert, Button, Field, Input, Select, TableWrap, Td, Textarea, Th, Tr } from "@/components/ui";
+import { addMonths, fromDateInput, toDateInput } from "@/lib/dates";
+import { formatPaise, paiseToRupees, rupeesToPaise, splitPaise } from "@/lib/money";
 import {
   addExtraChargeAction,
   assignSemesterFeeAction,
@@ -461,6 +463,63 @@ export function AddExtraChargeButton({
   );
 }
 
+/** One editable line of the schedule being laid out. */
+type PlanRow = { dueDate: string; amount: string };
+
+const asPaise = (value: string): number => {
+  const cleaned = value.trim().replace(/[,\s₹]/g, "");
+  if (cleaned === "") return 0;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? rupeesToPaise(n) : 0;
+};
+
+function scholarshipOf(tuitionPaise: number, basis: "PERCENT" | "AMOUNT", percent: string, amount: string): number {
+  if (basis === "AMOUNT") return Math.min(asPaise(amount), tuitionPaise);
+  const n = Number.parseInt(percent || "0", 10);
+  return Math.round((tuitionPaise * (Number.isFinite(n) ? n : 0)) / 100);
+}
+
+/** Tuition less scholarship, plus the exam and activity fees — the same sum the server takes. */
+function totalOf(
+  fees: { tuition?: string; examFee?: string; activityFee?: string } | undefined,
+  basis: "PERCENT" | "AMOUNT",
+  percent: string,
+  amount: string,
+): number {
+  const tuitionPaise = asPaise(fees?.tuition ?? "0");
+  return (
+    tuitionPaise -
+    scholarshipOf(tuitionPaise, basis, percent, amount) +
+    asPaise(fees?.examFee ?? "0") +
+    asPaise(fees?.activityFee ?? "0")
+  );
+}
+
+/**
+ * Monthly due dates from `firstDue`, compressed into an even spread when
+ * monthly spacing would overrun the batch completion date. Mirrors
+ * `buildInstallmentPlan` on the server, which re-checks whatever is submitted.
+ */
+function datesFor(count: number, firstDue: string, end: Date): Date[] {
+  const start = fromDateInput(firstDue);
+  if (Number.isNaN(start.getTime()) || count < 1) return [];
+  if (addMonths(start, count - 1) <= end) {
+    return Array.from({ length: count }, (_, i) => addMonths(start, i));
+  }
+  const span = Math.max(0, Math.round((end.getTime() - start.getTime()) / 86_400_000));
+  return Array.from({ length: count }, (_, i) => {
+    const date = new Date(start);
+    date.setDate(date.getDate() + (count === 1 ? 0 : Math.round((span * i) / (count - 1))));
+    return date;
+  });
+}
+
+function spreadOver(dates: Date[], totalPaise: number): PlanRow[] {
+  if (dates.length === 0) return [];
+  const amounts = splitPaise(Math.max(0, totalPaise), dates.length);
+  return dates.map((date, i) => ({ dueDate: toDateInput(date), amount: paiseToRupees(amounts[i]).toFixed(2) }));
+}
+
 /** A semester of the student's batch that carries no fee assignment yet. */
 export type AssignableSemester = {
   id: string;
@@ -485,6 +544,7 @@ export function AssignFeeButton({
   installmentMax,
   defaultInstallmentCount,
   defaultFirstDueDate,
+  completionDate,
   completionDateLabel,
   variant = "secondary",
 }: {
@@ -496,14 +556,19 @@ export function AssignFeeButton({
   installmentMax: number;
   defaultInstallmentCount: number;
   defaultFirstDueDate: string;
+  /** `yyyy-MM-dd` — no due date may fall after it. */
+  completionDate: string;
   completionDateLabel: string;
   variant?: "primary" | "secondary";
 }) {
   const [open, setOpen] = useState(false);
   const [semesterId, setSemesterId] = useState(defaultSemesterId || (semesters[0]?.id ?? ""));
   const [basis, setBasis] = useState<"PERCENT" | "AMOUNT">("PERCENT");
+  const [scholarshipPercent, setScholarshipPercent] = useState("0");
+  const [scholarshipAmount, setScholarshipAmount] = useState("");
 
   const semester = semesters.find((option) => option.id === semesterId) ?? semesters[0];
+  const end = fromDateInput(completionDate);
 
   // The three amounts follow the chosen semester, so switching it re-reads the
   // batch and semester presets instead of leaving the previous one's figures
@@ -514,13 +579,58 @@ export function AssignFeeButton({
     activityFee: semester?.activityFee ?? "0.00",
   });
 
+  // The generator's inputs. They are not submitted — the rows they produce are,
+  // and every one of those can be edited afterwards.
+  const [count, setCount] = useState(String(defaultInstallmentCount));
+  const [firstDue, setFirstDue] = useState(defaultFirstDueDate);
+  const [rows, setRows] = useState<PlanRow[]>(() =>
+    spreadOver(
+      datesFor(defaultInstallmentCount, defaultFirstDueDate, end),
+      totalOf(semesters.find((o) => o.id === (defaultSemesterId || semesters[0]?.id)), "PERCENT", "0", ""),
+    ),
+  );
+
+  const totalPaise = totalOf({ ...semester, ...amounts }, basis, scholarshipPercent, scholarshipAmount);
+  const scholarshipPaise = scholarshipOf(asPaise(amounts.tuition), basis, scholarshipPercent, scholarshipAmount);
+  const enteredPaise = rows.reduce((sum, row) => sum + asPaise(row.amount), 0);
+  const difference = totalPaise - enteredPaise;
+  const outsideRange = rows.length < installmentMin || rows.length > installmentMax;
+
   function chooseSemester(id: string) {
     setSemesterId(id);
     const chosen = semesters.find((option) => option.id === id);
-    if (chosen) {
-      setAmounts({ tuition: chosen.tuition, examFee: chosen.examFee, activityFee: chosen.activityFee });
-    }
+    if (!chosen) return;
+    setAmounts({ tuition: chosen.tuition, examFee: chosen.examFee, activityFee: chosen.activityFee });
+    // The dates the user has set are theirs to keep; only the money moves.
+    setRows((current) =>
+      spreadOver(
+        current.map((row) => fromDateInput(row.dueDate)),
+        totalOf({ ...chosen }, basis, scholarshipPercent, scholarshipAmount),
+      ),
+    );
   }
+
+  const regenerate = () => {
+    const n = Number.parseInt(count, 10);
+    if (!Number.isInteger(n) || n < 1) return;
+    setRows(spreadOver(datesFor(n, firstDue, end), totalPaise));
+  };
+
+  const spreadEvenly = () => {
+    if (rows.length === 0) return;
+    setRows(spreadOver(rows.map((row) => fromDateInput(row.dueDate)), totalPaise));
+  };
+
+  const setRow = (index: number, patch: Partial<PlanRow>) =>
+    setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+
+  const addRow = () => {
+    const last = rows[rows.length - 1];
+    const next = last ? addMonths(fromDateInput(last.dueDate), 1) : new Date();
+    setRows((current) => [...current, { dueDate: toDateInput(next > end ? end : next), amount: "0.00" }]);
+  };
+
+  const removeRow = (index: number) => setRows((current) => current.filter((_, i) => i !== index));
 
   if (semesters.length === 0) return null;
 
@@ -541,6 +651,7 @@ export function AssignFeeButton({
             <>
               <input type="hidden" name="studentId" value={studentId} />
               <input type="hidden" name="scholarshipBasis" value={basis} />
+              <input type="hidden" name="rows" value={JSON.stringify(rows)} />
 
               <Field
                 label="Semester"
@@ -594,7 +705,8 @@ export function AssignFeeButton({
                     <Input
                       name="scholarshipPercent"
                       inputMode="numeric"
-                      defaultValue="0"
+                      value={scholarshipPercent}
+                      onChange={(e) => setScholarshipPercent(e.target.value)}
                       className="w-28"
                       aria-label="Scholarship percent"
                     />
@@ -602,11 +714,16 @@ export function AssignFeeButton({
                     <Input
                       name="scholarshipAmount"
                       inputMode="decimal"
+                      value={scholarshipAmount}
+                      onChange={(e) => setScholarshipAmount(e.target.value)}
                       placeholder="0.00"
                       className="w-40"
                       aria-label="Scholarship amount in rupees"
                     />
                   )}
+                  {scholarshipPaise > 0 ? (
+                    <span className="text-xs text-muted">− {formatPaise(scholarshipPaise)}</span>
+                  ) : null}
                 </div>
               </Field>
 
@@ -631,37 +748,112 @@ export function AssignFeeButton({
                 </Field>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  label="Installments"
-                  htmlFor="assignInstallmentCount"
-                  required
-                  hint={`Between ${installmentMin} and ${installmentMax}.`}
-                  error={fieldError(state, "installmentCount")}
-                >
-                  <Input
-                    id="assignInstallmentCount"
-                    name="installmentCount"
-                    inputMode="numeric"
-                    required
-                    defaultValue={String(defaultInstallmentCount)}
-                  />
-                </Field>
-                <Field
-                  label="First installment due"
-                  htmlFor="assignFirstDueDate"
-                  required
-                  hint={`Every due date must land on or before ${completionDateLabel}. A date already past makes that installment overdue at once, and the late fee slabs apply.`}
-                  error={fieldError(state, "firstDueDate")}
-                >
-                  <Input
-                    id="assignFirstDueDate"
-                    name="firstDueDate"
-                    type="date"
-                    required
-                    defaultValue={defaultFirstDueDate}
-                  />
-                </Field>
+              <div className="rounded-md border border-border p-4">
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Installments</p>
+                    <p className="text-xs text-muted">
+                      Between {installmentMin} and {installmentMax}, in date order, every due date on or before{" "}
+                      {completionDateLabel}. A date already past makes that installment overdue at once and the late fee
+                      slabs apply.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <Input
+                      inputMode="numeric"
+                      value={count}
+                      onChange={(e) => setCount(e.target.value)}
+                      className="w-20"
+                      aria-label="How many installments to generate"
+                    />
+                    <Input
+                      type="date"
+                      value={firstDue}
+                      max={completionDate}
+                      onChange={(e) => setFirstDue(e.target.value)}
+                      className="w-44"
+                      aria-label="First installment due date"
+                    />
+                    <Button type="button" variant="secondary" size="sm" onClick={regenerate}>
+                      Generate
+                    </Button>
+                  </div>
+                </div>
+
+                <TableWrap>
+                  <thead>
+                    <tr>
+                      <Th className="w-12">#</Th>
+                      <Th>Due date</Th>
+                      <Th>Amount (₹)</Th>
+                      <Th className="w-24" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <Td colSpan={4} className="text-center text-muted">
+                          No installments yet — set a count and a first due date, then Generate.
+                        </Td>
+                      </tr>
+                    ) : (
+                      rows.map((row, index) => (
+                        <Tr key={index}>
+                          <Td className="tabular-nums">{index + 1}</Td>
+                          <Td>
+                            <Input
+                              type="date"
+                              value={row.dueDate}
+                              max={completionDate}
+                              onChange={(e) => setRow(index, { dueDate: e.target.value })}
+                              aria-label={`Installment ${index + 1} due date`}
+                            />
+                          </Td>
+                          <Td>
+                            <Input
+                              inputMode="decimal"
+                              value={row.amount}
+                              placeholder="0.00"
+                              onChange={(e) => setRow(index, { amount: e.target.value })}
+                              aria-label={`Installment ${index + 1} amount`}
+                            />
+                          </Td>
+                          <Td>
+                            {rows.length > 1 ? (
+                              <Button type="button" variant="ghost" size="sm" onClick={() => removeRow(index)}>
+                                Remove
+                              </Button>
+                            ) : null}
+                          </Td>
+                        </Tr>
+                      ))
+                    )}
+                  </tbody>
+                </TableWrap>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <span
+                    className={`text-sm ${difference === 0 && !outsideRange ? "text-muted" : "text-danger font-medium"}`}
+                  >
+                    {difference === 0
+                      ? `${rows.length} installment(s) adding up to ${formatPaise(totalPaise)}`
+                      : difference > 0
+                        ? `${formatPaise(difference)} still to allocate — the plan must come to ${formatPaise(totalPaise)}`
+                        : `${formatPaise(-difference)} over-allocated — the plan must come to ${formatPaise(totalPaise)}`}
+                    {outsideRange ? ` · ${rows.length} row(s) is outside the allowed ${installmentMin}–${installmentMax}` : ""}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="secondary" size="sm" onClick={spreadEvenly}>
+                      Spread evenly
+                    </Button>
+                    <Button type="button" variant="secondary" size="sm" onClick={addRow}>
+                      Add row
+                    </Button>
+                  </div>
+                </div>
+                {fieldError(state, "rows") ? (
+                  <p className="mt-2 text-sm text-danger">{fieldError(state, "rows")}</p>
+                ) : null}
               </div>
 
               <Field
@@ -682,7 +874,9 @@ export function AssignFeeButton({
                 <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <SubmitButton pendingLabel="Assigning…">Assign fee</SubmitButton>
+                <SubmitButton pendingLabel="Assigning…" disabled={difference !== 0 || outsideRange || totalPaise <= 0}>
+                  Assign fee
+                </SubmitButton>
               </div>
             </>
           )}
