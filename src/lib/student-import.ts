@@ -4,7 +4,7 @@ import { getConfig } from "@/lib/config";
 import { ValidationError } from "@/lib/errors";
 import { rupeesToPaise } from "@/lib/money";
 import { startOfDay } from "@/lib/dates";
-import { formatStudentCode, nextLfNo } from "@/lib/sequence";
+import { formatStudentCode, nextLfNoBlock } from "@/lib/sequence";
 import {
   mapHeaders,
   normaliseHeader,
@@ -216,6 +216,11 @@ const RELATIONS: Record<string, GuardianRelation> = {
 /* Validation                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/** Matches the old per-row lookup: name compared case-insensitively, dob exactly. */
+function nameAndDobKey(fullName: string, dob: Date): string {
+  return `${fullName.trim().toLowerCase()}|${dob.getTime()}`;
+}
+
 export async function prepareImport(
   storagePath: string,
   fileName: string,
@@ -309,6 +314,24 @@ export async function prepareImport(
     ...studentLfNos.map((s) => s.lfNo),
     ...applicationLfNos.map((a) => a.lfNo!),
   ]);
+  // Duplicate detection reads the existing roll once rather than querying per
+  // row: a migration file runs to hundreds of rows, and two round trips each is
+  // enough on a hosted database to push the request past its time budget.
+  const existingStudents = await db.student.findMany({
+    select: { studentCode: true, fullName: true, dob: true, nationalId: true },
+  });
+  const studentByNationalId = new Map<string, string>();
+  const studentByNameAndDob = new Map<string, string>();
+  for (const student of existingStudents) {
+    if (student.nationalId && !studentByNationalId.has(student.nationalId)) {
+      studentByNationalId.set(student.nationalId, student.studentCode);
+    }
+    if (student.dob) {
+      const key = nameAndDobKey(student.fullName, student.dob);
+      if (!studentByNameAndDob.has(key)) studentByNameAndDob.set(key, student.studentCode);
+    }
+  }
+
   const seenLfNos = new Set<number>();
   const seenNationalIds = new Set<string>();
   // Seats must account for rows earlier in this same file, not just the database.
@@ -404,22 +427,19 @@ export async function prepareImport(
       if (seenNationalIds.has(nationalId)) {
         warnings.push({ field: "nationalId", message: "This National ID appears more than once in this file." });
       }
-      const existing = await db.student.findFirst({ where: { nationalId }, select: { studentCode: true } });
+      const existing = studentByNationalId.get(nationalId);
       if (existing) {
         warnings.push({
           field: "nationalId",
-          message: `A student with this National ID already exists (${existing.studentCode}).`,
+          message: `A student with this National ID already exists (${existing}).`,
         });
       }
     }
 
     if (fullName && dob && dob !== "invalid") {
-      const duplicate = await db.student.findFirst({
-        where: { fullName: { equals: fullName, mode: "insensitive" }, dob },
-        select: { studentCode: true },
-      });
+      const duplicate = studentByNameAndDob.get(nameAndDobKey(fullName, dob));
       if (duplicate) {
-        warnings.push({ message: `Same name and date of birth as existing student ${duplicate.studentCode}.` });
+        warnings.push({ message: `Same name and date of birth as existing student ${duplicate}.` });
       }
     }
 
@@ -568,9 +588,30 @@ export async function prepareImport(
 export type ImportOutcome = { created: number; skipped: number; studentCodes: string[] };
 
 /**
+ * Postgres caps a statement at 65535 bind parameters, and the widest row here
+ * carries around two dozen columns. Splitting well below that keeps a large
+ * file to a handful of statements without ever approaching the limit.
+ */
+const WRITE_CHUNK = 500;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
  * Writes the valid rows. Rows carrying errors are skipped, never partially
  * applied. The whole batch runs in one transaction so a failure leaves nothing
  * half-migrated.
+ *
+ * Each table is written in bulk rather than a row at a time. A migration file
+ * runs to hundreds of students, and a round trip per student per table put the
+ * transaction over its timeout on a hosted database — which rolled the entire
+ * import back and left the Admin with nothing to show for it. Rows are matched
+ * back to their generated ids by the unique value they carry (`studentCode`,
+ * then `studentId`) rather than by insertion order, so nothing depends on the
+ * order a bulk insert happens to return.
  */
 export async function commitImport(preview: ImportPreview, actorId: string): Promise<ImportOutcome> {
   const valid = preview.rows.filter((row) => row.resolved);
@@ -579,23 +620,34 @@ export async function commitImport(preview: ImportPreview, actorId: string): Pro
   }
 
   const config = await getConfig();
-  const studentCodes: string[] = [];
 
-  // The file's own LF Nos are claimed row by row, so a number spelled out near
+  // The file's own LF Nos are reserved up front, so a number spelled out near
   // the end of the file is still off-limits to a blank row near the start.
   const spokenFor = valid
     .map((row) => row.resolved!.lfNo)
     .filter((lfNo): lfNo is number => lfNo !== null);
 
-  await prisma.$transaction(
+  const studentCodes = await prisma.$transaction(
     async (tx) => {
-      for (const row of valid) {
-        const data = row.resolved!;
-        const lfNo = data.lfNo ?? (await nextLfNo(tx, spokenFor));
-        const studentCode = formatStudentCode(config.studentIdPrefix, lfNo, config.lfNoLength);
+      const claimed = await nextLfNoBlock(tx, valid.length - spokenFor.length, spokenFor);
+      let nextClaimed = 0;
 
-        const application = await tx.application.create({
-          data: {
+      const entries = valid.map((row) => {
+        const data = row.resolved!;
+        const lfNo = data.lfNo ?? claimed[nextClaimed++];
+        return {
+          rowNumber: row.rowNumber,
+          data,
+          lfNo,
+          studentCode: formatStudentCode(config.studentIdPrefix, lfNo, config.lfNoLength),
+        };
+      });
+
+      const applicationIds = new Map<string, string>();
+      for (const batch of chunk(entries, WRITE_CHUNK)) {
+        const created = await tx.application.createManyAndReturn({
+          select: { id: true, studentCode: true },
+          data: batch.map(({ rowNumber, data, lfNo, studentCode }) => ({
             fullName: data.fullName,
             gender: data.gender,
             dob: data.dob,
@@ -612,36 +664,46 @@ export async function commitImport(preview: ImportPreview, actorId: string): Pro
             departmentId: data.departmentId,
             courseId: data.courseId,
             batchId: data.batchId,
-            status: "ENROLLED",
+            status: "ENROLLED" as const,
             submittedAt: data.enrollmentDate,
             reviewedAt: data.enrollmentDate,
             reviewedById: actorId,
-            decisionReason: `Migrated via bulk import from ${preview.fileName} (row ${row.rowNumber})`,
+            decisionReason: `Migrated via bulk import from ${preview.fileName} (row ${rowNumber})`,
             lfNo,
             studentCode,
             createdById: actorId,
-          },
+          })),
         });
+        for (const application of created) applicationIds.set(application.studentCode!, application.id);
+      }
 
-        if (data.guardian) {
-          await tx.guardian.create({
-            data: {
-              applicationId: application.id,
-              name: data.guardian.name,
-              relation: data.guardian.relation,
-              phone: data.guardian.phone,
-              email: data.guardian.email,
-              occupation: data.guardian.occupation,
-              isPrimary: true,
-            },
-          });
-        }
+      const guardians = entries.flatMap(({ data, studentCode }) =>
+        data.guardian
+          ? [
+              {
+                applicationId: applicationIds.get(studentCode)!,
+                name: data.guardian.name,
+                relation: data.guardian.relation,
+                phone: data.guardian.phone,
+                email: data.guardian.email,
+                occupation: data.guardian.occupation,
+                isPrimary: true,
+              },
+            ]
+          : [],
+      );
+      for (const batch of chunk(guardians, WRITE_CHUNK)) {
+        await tx.guardian.createMany({ data: batch });
+      }
 
-        const student = await tx.student.create({
-          data: {
+      const studentIds = new Map<string, string>();
+      for (const batch of chunk(entries, WRITE_CHUNK)) {
+        const created = await tx.student.createManyAndReturn({
+          select: { id: true, studentCode: true },
+          data: batch.map(({ data, lfNo, studentCode }) => ({
             studentCode,
             lfNo,
-            applicationId: application.id,
+            applicationId: applicationIds.get(studentCode)!,
             fullName: data.fullName,
             gender: data.gender,
             dob: data.dob,
@@ -660,36 +722,44 @@ export async function commitImport(preview: ImportPreview, actorId: string): Pro
             currentSemesterId: data.semesterId,
             enrollmentDate: data.enrollmentDate,
             status: data.status,
-          },
+          })),
         });
-
-        // Carry the old system's balance in as one clearly-labelled assignment
-        // holding the student's remaining installments, so the ledger, the Fee
-        // Due report and the reminder job are complete from day one.
-        if (data.installments.length > 0) {
-          const totalPaise = data.installments.reduce((sum, item) => sum + item.amountPaise, 0);
-          const assignment = await tx.feeAssignment.create({
-            data: {
-              studentId: student.id,
-              semesterId: data.semesterId,
-              yearNumber: 1,
-              totalPayablePaise: totalPaise,
-              note: "Opening balance carried over during migration",
-              createdById: actorId,
-            },
-          });
-          await tx.installment.createMany({
-            data: data.installments.map((item, index) => ({
-              feeAssignmentId: assignment.id,
-              seqNo: index + 1,
-              dueDate: item.dueDate,
-              amountPaise: item.amountPaise,
-            })),
-          });
-        }
-
-        studentCodes.push(studentCode);
+        for (const student of created) studentIds.set(student.studentCode, student.id);
       }
+
+      // Carry the old system's balance in as one clearly-labelled assignment per
+      // student holding their remaining installments, so the ledger, the Fee Due
+      // report and the reminder job are complete from day one.
+      const owing = entries.filter(({ data }) => data.installments.length > 0);
+      const assignmentIds = new Map<string, string>();
+      for (const batch of chunk(owing, WRITE_CHUNK)) {
+        const created = await tx.feeAssignment.createManyAndReturn({
+          select: { id: true, studentId: true },
+          data: batch.map(({ data, studentCode }) => ({
+            studentId: studentIds.get(studentCode)!,
+            semesterId: data.semesterId,
+            yearNumber: 1,
+            totalPayablePaise: data.installments.reduce((sum, item) => sum + item.amountPaise, 0),
+            note: "Opening balance carried over during migration",
+            createdById: actorId,
+          })),
+        });
+        for (const assignment of created) assignmentIds.set(assignment.studentId, assignment.id);
+      }
+
+      const installments = owing.flatMap(({ data, studentCode }) =>
+        data.installments.map((item, index) => ({
+          feeAssignmentId: assignmentIds.get(studentIds.get(studentCode)!)!,
+          seqNo: index + 1,
+          dueDate: item.dueDate,
+          amountPaise: item.amountPaise,
+        })),
+      );
+      for (const batch of chunk(installments, WRITE_CHUNK)) {
+        await tx.installment.createMany({ data: batch });
+      }
+
+      return entries.map((entry) => entry.studentCode);
     },
     { timeout: 120_000 },
   );
