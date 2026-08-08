@@ -9,14 +9,15 @@ import { recordAuditTx } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { balanceOf, refreshInstallment } from "@/lib/late-fees";
-import { validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
-import { formatDate, fromDateInput } from "@/lib/dates";
+import { buildInstallmentPlan, validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
+import { formatDate, fromDateInput, startOfDay } from "@/lib/dates";
 import { formatPaise, percentOf, rupeesToPaise } from "@/lib/money";
 import {
   checkboxInput,
   dateInput,
   fieldErrorsOf,
   formObject,
+  intInput,
   optionalDateInput,
   optionalIntInput,
   optionalRupeeAmount,
@@ -390,6 +391,202 @@ export async function addExtraChargeAction(_prev: unknown, formData: FormData): 
     return ok(
       undefined,
       `${formatPaise(amount)} charged — “${label}”, due ${formatDate(dueDate)}. It is collectible now, like any other installment.`,
+    );
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Assigning a semester's fee                                                  */
+/* -------------------------------------------------------------------------- */
+
+const assignFeeSchema = z.object({
+  studentId: requiredText("Student"),
+  semesterId: requiredText("Semester"),
+  lockedTuitionRate: optionalRupeeAmount("Tuition rate"),
+  scholarshipBasis: z.enum(["PERCENT", "AMOUNT"]).default("PERCENT"),
+  scholarshipPercent: optionalIntInput("Scholarship", { min: 0, max: 100 }),
+  scholarshipAmount: optionalRupeeAmount("Scholarship amount"),
+  examFee: optionalRupeeAmount("Exam fee"),
+  activityFee: optionalRupeeAmount("Activity fee"),
+  installmentCount: intInput("Installments", { min: 1, max: 60 }),
+  firstDueDate: dateInput("First installment due date"),
+  note: optionalText,
+});
+
+/**
+ * Assign a semester's fee to a student who has none for it.
+ *
+ * Every other route into a fee assignment is tied to a moment in a student's
+ * progress: approval bills the first semester, a promotion run bills the one it
+ * moves a cohort into. A student who arrived by bulk import (spec 1.8) went
+ * through neither. The importer records an opening balance when the file
+ * carries one, but a migrated student with nothing outstanding lands mid-course
+ * with no charge against them at all — nothing in the ledger, nothing in Fee
+ * Due, nothing to collect against — and no way to put that right from the
+ * record. This is that way.
+ *
+ * It creates the assignment and generates its schedule the same way enrollment
+ * and promotion do, so what it produces is indistinguishable from a fee
+ * assigned by either. Editing it afterwards is the existing "Edit assigned fee"
+ * screen; this only fills a gap, and refuses a semester that already has one.
+ *
+ * Back-dated first due dates are expected here — a migrated student is usually
+ * part-way through the semester being billed — so installments already past
+ * their date are brought up to date immediately rather than waiting for the
+ * nightly job to notice them.
+ */
+export async function assignSemesterFeeAction(
+  _prev: unknown,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  return runAction(async () => {
+    const actor = await assertPermission(PERMISSIONS.FEE_ASSIGN);
+    const parsed = assignFeeSchema.safeParse(formObject(formData));
+    if (!parsed.success) return fail("Please correct the highlighted fields.", fieldErrorsOf(parsed.error));
+
+    const { studentId, semesterId, scholarshipBasis, installmentCount, firstDueDate, note } = parsed.data;
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        studentCode: true,
+        status: true,
+        batchId: true,
+        batch: { select: { code: true, completionDate: true } },
+      },
+    });
+    if (!student) return fail("Student not found.");
+    if (student.status === "DROPPED_OUT" || student.status === "EXPELLED") {
+      return fail(
+        `${student.studentCode} is ${student.status.replaceAll("_", "-").toLowerCase()} — reinstate the student before billing anything further.`,
+      );
+    }
+
+    const semester = await prisma.semester.findUnique({ where: { id: semesterId } });
+    if (!semester || semester.batchId !== student.batchId) {
+      return fail("That semester does not belong to this student's batch.", {
+        semesterId: ["Choose a semester of the student's own batch."],
+      });
+    }
+
+    // One assignment per student per semester, so this can only ever fill a gap.
+    // Changing a fee already assigned is the edit screen, which protects what
+    // has been paid or discounted against it.
+    const existing = await prisma.feeAssignment.findUnique({
+      where: { studentId_semesterId: { studentId, semesterId } },
+      select: { id: true },
+    });
+    if (existing) {
+      return fail(
+        `Semester ${semester.semesterNumber} already has a fee assigned. Edit that assignment rather than adding a second one.`,
+        { semesterId: ["Already assigned."] },
+      );
+    }
+
+    const config = await getConfig();
+    if (installmentCount < config.installmentMin || installmentCount > config.installmentMax) {
+      return fail(`Installments must be between ${config.installmentMin} and ${config.installmentMax}.`, {
+        installmentCount: [`Allowed range is ${config.installmentMin}–${config.installmentMax}.`],
+      });
+    }
+    if (firstDueDate > student.batch.completionDate) {
+      return fail(`Batch ${student.batch.code} completes on ${formatDate(student.batch.completionDate)}.`, {
+        firstDueDate: ["Must be on or before the batch completion date."],
+      });
+    }
+
+    // A flat concession can never exceed the tuition it is discounting; the two
+    // ways of quoting one are mutually exclusive, exactly as at enrollment.
+    const lockedTuitionRatePaise = parsed.data.lockedTuitionRate;
+    const asAmount = scholarshipBasis === "AMOUNT";
+    const scholarshipPercent = asAmount ? 0 : (parsed.data.scholarshipPercent ?? 0);
+    const scholarshipAmountPaise = asAmount
+      ? Math.min(parsed.data.scholarshipAmount, lockedTuitionRatePaise)
+      : percentOf(lockedTuitionRatePaise, scholarshipPercent);
+    const tuitionComponentPaise = lockedTuitionRatePaise - scholarshipAmountPaise;
+    const totalPayablePaise = tuitionComponentPaise + parsed.data.examFee + parsed.data.activityFee;
+
+    if (totalPayablePaise <= 0) {
+      return fail(
+        "There is nothing to charge — give a tuition rate, an exam fee or an activity fee. An assignment worth nothing would only show as a card of zeros.",
+      );
+    }
+
+    const plan = buildInstallmentPlan({
+      totalPayablePaise,
+      count: installmentCount,
+      firstDueDate,
+      completionDate: student.batch.completionDate,
+    });
+
+    await prisma.$transaction(async (tx) => {
+      const assignment = await tx.feeAssignment.create({
+        data: {
+          studentId,
+          semesterId,
+          academicYearId: semester.academicYearId,
+          yearNumber: semester.yearNumber,
+          lockedTuitionRatePaise,
+          tuitionComponentPaise,
+          scholarshipPercent,
+          scholarshipAmountPaise,
+          examFeePaise: parsed.data.examFee,
+          activityFeePaise: parsed.data.activityFee,
+          totalPayablePaise,
+          note: note ?? null,
+          createdById: actor.id,
+        },
+      });
+
+      await tx.installment.createMany({
+        data: plan.map((item) => ({ ...item, feeAssignmentId: assignment.id })),
+      });
+
+      // Only the ones already past their date need it — a future installment is
+      // created PENDING with no late fee, which is what it should be.
+      const alreadyDue = await tx.installment.findMany({
+        where: { feeAssignmentId: assignment.id, dueDate: { lt: startOfDay(new Date()) } },
+        select: { id: true },
+      });
+      for (const installment of alreadyDue) {
+        await refreshInstallment(installment.id, tx);
+      }
+
+      await recordAuditTx(tx, {
+        userId: actor.id,
+        action: "fee.assigned",
+        entityType: "FeeAssignment",
+        entityId: assignment.id,
+        summary:
+          `${formatPaise(totalPayablePaise)} assigned to ${student.studentCode} for semester ` +
+          `${semester.semesterNumber} (year ${semester.yearNumber}) over ${plan.length} installment(s)`,
+        reason: note ?? undefined,
+        metadata: {
+          semesterId,
+          lockedTuitionRatePaise,
+          scholarshipPercent,
+          scholarshipAmountPaise,
+          examFeePaise: parsed.data.examFee,
+          activityFeePaise: parsed.data.activityFee,
+          totalPayablePaise,
+          installmentCount: plan.length,
+          firstDueDate: plan[0].dueDate,
+          lastDueDate: plan[plan.length - 1].dueDate,
+          backdatedInstallments: alreadyDue.length,
+        },
+      });
+    });
+
+    revalidatePath(`/students/${studentId}`);
+    revalidatePath("/students");
+    revalidatePath("/fees/collect");
+    revalidatePath("/reports/ledger");
+    revalidatePath("/reports");
+    return ok(
+      undefined,
+      `${formatPaise(totalPayablePaise)} assigned for semester ${semester.semesterNumber} over ${plan.length} ` +
+        `installment(s), first due ${formatDate(plan[0].dueDate)}. It is collectible now and appears in Fee Due.`,
     );
   });
 }

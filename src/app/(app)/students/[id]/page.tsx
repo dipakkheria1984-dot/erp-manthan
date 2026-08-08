@@ -2,9 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
+import { getConfig } from "@/lib/config";
 import { PERMISSIONS } from "@/lib/permissions";
-import { formatDate } from "@/lib/dates";
-import { formatPaise } from "@/lib/money";
+import { formatDate, startOfDay, toDateInput } from "@/lib/dates";
+import { formatPaise, paiseToRupees } from "@/lib/money";
+import { installmentsFitting, tuitionRateAt } from "@/lib/fees";
 import { waivableLateFeePaise } from "@/lib/late-fees";
 import {
   INSTALLMENT_STATUS_TONE,
@@ -16,6 +18,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { scholarshipLabel } from "@/lib/enrollment";
 import {
+  Alert,
   Badge,
   Card,
   DescriptionList,
@@ -30,6 +33,7 @@ import {
 } from "@/components/ui";
 import {
   AddExtraChargeButton,
+  AssignFeeButton,
   BacklogToggle,
   StatusChangeButton,
   UnwaiveInstallmentButton,
@@ -37,6 +41,7 @@ import {
   GrantDiscountButton,
   CancelDiscountButton,
   RestoreLateFeeButton,
+  type AssignableSemester,
 } from "./student-actions";
 import { WaiveLateFeeButton } from "@/components/waive-late-fee-button";
 
@@ -61,7 +66,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     include: {
       department: true,
       course: true,
-      batch: true,
+      batch: { include: { semesters: { orderBy: { semesterNumber: "asc" } } } },
       currentSemester: true,
       application: { include: { guardians: true } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { changedAt: "desc" } },
@@ -120,6 +125,69 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     student.feeAssignments[student.feeAssignments.length - 1]?.id ??
     "";
 
+  /* ---------------------------------------------------------------------- */
+  /* Semesters that have never been billed                                   */
+  /* ---------------------------------------------------------------------- */
+
+  // Approval bills the first semester and a promotion run bills the one it moves
+  // a cohort into, so a student who arrived by bulk import can sit mid-course
+  // with semesters that were never charged at all. Those are what "Assign fee"
+  // offers; a semester already carrying an assignment is corrected through the
+  // edit screen instead.
+  const config = await getConfig();
+  const assignedSemesterIds = new Set(student.feeAssignments.map((assignment) => assignment.semesterId));
+  const unbilledSemesters = student.batch.semesters.filter((semester) => !assignedSemesterIds.has(semester.id));
+
+  // Tuition is a charge on the year of the course, carried by the semester that
+  // opens it (spec 6.4) — so it is offered only there, and only when no
+  // assignment in that year is already charging it.
+  const firstSemesterOfYear = new Map<number, number>();
+  for (const semester of student.batch.semesters) {
+    const lowest = firstSemesterOfYear.get(semester.yearNumber);
+    if (lowest === undefined || semester.semesterNumber < lowest) {
+      firstSemesterOfYear.set(semester.yearNumber, semester.semesterNumber);
+    }
+  }
+  const yearsAlreadyCharged = new Set(
+    student.feeAssignments.filter((a) => a.tuitionComponentPaise > 0).map((a) => a.yearNumber),
+  );
+
+  const lockedRatePaise = unbilledSemesters.length > 0 ? await tuitionRateAt(student.batchId, student.enrollmentDate) : 0;
+  const rupeeField = (paise: number) => paiseToRupees(paise).toFixed(2);
+
+  const assignableSemesters: AssignableSemester[] = unbilledSemesters.map((semester) => {
+    const opensYear = firstSemesterOfYear.get(semester.yearNumber) === semester.semesterNumber;
+    const yearCharged = yearsAlreadyCharged.has(semester.yearNumber);
+    const offersTuition = opensYear && !yearCharged;
+    return {
+      id: semester.id,
+      label: `Semester ${semester.semesterNumber} — Year ${semester.yearNumber}${
+        semester.id === student.currentSemesterId ? " (current)" : ""
+      }`,
+      tuition: rupeeField(offersTuition ? lockedRatePaise : 0),
+      examFee: rupeeField(semester.examFeePaise),
+      activityFee: rupeeField(semester.activityFeePaise),
+      tuitionHint: offersTuition
+        ? `The rate locked to their enrollment date, ${formatDate(student.enrollmentDate)}. Tuition is charged once per year of the course, on the semester that opens it.`
+        : yearCharged
+          ? `Year ${semester.yearNumber} tuition is already charged on another semester — leave this at zero unless you mean to charge it twice.`
+          : `Semester ${semester.semesterNumber} does not open a year of the course, so it normally carries exam and activity fees only.`,
+    };
+  });
+
+  // A semester the student has not reached is *meant* to carry no fee — the
+  // promotion run bills each one as the cohort moves into it. Only a gap at or
+  // behind where they are sitting is a student going uncharged, which is the
+  // case worth putting in front of the Registrar.
+  const currentSemesterNumber = student.currentSemester?.semesterNumber ?? 0;
+  const gapSemesters = unbilledSemesters.filter((semester) => semester.semesterNumber <= currentSemesterNumber);
+  const defaultSemesterId = (gapSemesters[0] ?? unbilledSemesters[0])?.id ?? "";
+
+  const today = startOfDay(new Date());
+  const fitting = installmentsFitting(today, student.batch.completionDate);
+  const defaultInstallmentCount = Math.max(config.installmentMin, Math.min(config.installmentMax, fitting || 1));
+  const canAssignFee = canEditFees && assignableSemesters.length > 0;
+
   return (
     <>
       <PageHeader
@@ -158,6 +226,18 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
                 totalOutstandingLabel={formatPaise(unpaidRoom)}
                 unpaidCount={unpaidCount}
                 trigger="header"
+              />
+            ) : null}
+            {canAssignFee ? (
+              <AssignFeeButton
+                studentId={student.id}
+                semesters={assignableSemesters}
+                defaultSemesterId={defaultSemesterId}
+                installmentMin={config.installmentMin}
+                installmentMax={config.installmentMax}
+                defaultInstallmentCount={defaultInstallmentCount}
+                defaultFirstDueDate={toDateInput(today)}
+                completionDateLabel={formatDate(student.batch.completionDate)}
               />
             ) : null}
             {canEditFees && chargeableAssignments.length > 0 ? (
@@ -310,6 +390,28 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
               </tbody>
             </TableWrap>
           </Card>
+        ) : null}
+
+        {/* Silence here used to be indistinguishable from a student who owes
+            nothing, which is how imported students went unbilled unnoticed. */}
+        {student.feeAssignments.length === 0 ? (
+          <Alert tone="warning" title="No fee has been assigned to this student">
+            Nothing is charged for any semester, so this student appears nowhere in Fee Due, no reminder will reach them
+            and there is nothing to collect against. A student who arrived by bulk import went through neither approval
+            nor a promotion run, which is usually the reason.
+            {canAssignFee ? " “Assign fee” above bills a semester." : null}
+          </Alert>
+        ) : gapSemesters.length > 0 ? (
+          <Alert
+            tone="warning"
+            title={`Semester ${gapSemesters.map((semester) => semester.semesterNumber).join(", ")} carries no fee`}
+          >
+            The student has reached {currentSemesterNumber === 0 ? "this point" : `semester ${currentSemesterNumber}`}{" "}
+            without anything being charged for{" "}
+            {gapSemesters.length === 1 ? "that semester" : "those semesters"}, so none of it is collectible or visible
+            in Fee Due. Semesters they have not reached yet are billed by the promotion run and are not counted here.
+            {canAssignFee ? " “Assign fee” above fills the gap." : null}
+          </Alert>
         ) : null}
 
         {student.feeAssignments.map((assignment) => (

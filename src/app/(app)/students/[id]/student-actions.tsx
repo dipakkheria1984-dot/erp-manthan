@@ -5,6 +5,7 @@ import { ActionForm, Modal, ReasonActionButton, SubmitButton, fieldError } from 
 import { Alert, Button, Field, Input, Select, Textarea } from "@/components/ui";
 import {
   addExtraChargeAction,
+  assignSemesterFeeAction,
   cancelDiscountAction,
   restoreLateFeeAction,
   changeStudentStatusAction,
@@ -451,6 +452,237 @@ export function AddExtraChargeButton({
                   Cancel
                 </Button>
                 <SubmitButton pendingLabel="Charging…">Raise charge</SubmitButton>
+              </div>
+            </>
+          )}
+        </ActionForm>
+      </Modal>
+    </>
+  );
+}
+
+/** A semester of the student's batch that carries no fee assignment yet. */
+export type AssignableSemester = {
+  id: string;
+  label: string;
+  /**
+   * Rupee strings prefilled into the form when the semester is chosen. Tuition
+   * is the rate locked to the student's enrollment date, offered only on the
+   * semester that opens a year the student has not been charged tuition for —
+   * tuition is a charge on the year, carried by its first semester.
+   */
+  tuition: string;
+  examFee: string;
+  activityFee: string;
+  tuitionHint: string;
+};
+
+export function AssignFeeButton({
+  studentId,
+  semesters,
+  defaultSemesterId,
+  installmentMin,
+  installmentMax,
+  defaultInstallmentCount,
+  defaultFirstDueDate,
+  completionDateLabel,
+  variant = "secondary",
+}: {
+  studentId: string;
+  semesters: AssignableSemester[];
+  /** The earliest semester the student has reached that carries no fee. */
+  defaultSemesterId: string;
+  installmentMin: number;
+  installmentMax: number;
+  defaultInstallmentCount: number;
+  defaultFirstDueDate: string;
+  completionDateLabel: string;
+  variant?: "primary" | "secondary";
+}) {
+  const [open, setOpen] = useState(false);
+  const [semesterId, setSemesterId] = useState(defaultSemesterId || (semesters[0]?.id ?? ""));
+  const [basis, setBasis] = useState<"PERCENT" | "AMOUNT">("PERCENT");
+
+  const semester = semesters.find((option) => option.id === semesterId) ?? semesters[0];
+
+  // The three amounts follow the chosen semester, so switching it re-reads the
+  // batch and semester presets instead of leaving the previous one's figures
+  // sitting in the fields.
+  const [amounts, setAmounts] = useState({
+    tuition: semester?.tuition ?? "0.00",
+    examFee: semester?.examFee ?? "0.00",
+    activityFee: semester?.activityFee ?? "0.00",
+  });
+
+  function chooseSemester(id: string) {
+    setSemesterId(id);
+    const chosen = semesters.find((option) => option.id === id);
+    if (chosen) {
+      setAmounts({ tuition: chosen.tuition, examFee: chosen.examFee, activityFee: chosen.activityFee });
+    }
+  }
+
+  if (semesters.length === 0) return null;
+
+  return (
+    <>
+      <Button type="button" variant={variant} onClick={() => setOpen(true)}>
+        Assign fee
+      </Button>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Assign a semester's fee"
+        description="For a semester this student has never been billed for — most often one who arrived by bulk import and so went through neither approval nor a promotion run. The figures are prefilled from the batch and semester presets; the schedule is generated the same way enrollment and promotion generate one."
+        width="lg"
+      >
+        <ActionForm action={assignSemesterFeeAction} onSuccess={() => setOpen(false)}>
+          {(state) => (
+            <>
+              <input type="hidden" name="studentId" value={studentId} />
+              <input type="hidden" name="scholarshipBasis" value={basis} />
+
+              <Field
+                label="Semester"
+                htmlFor="assignSemester"
+                required
+                hint="Only semesters with no fee assigned are listed."
+                error={fieldError(state, "semesterId")}
+              >
+                <Select
+                  id="assignSemester"
+                  name="semesterId"
+                  value={semesterId}
+                  onChange={(e) => chooseSemester(e.target.value)}
+                  required
+                >
+                  {semesters.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field
+                label="Tuition rate (₹)"
+                htmlFor="assignTuition"
+                hint={semester?.tuitionHint}
+                error={fieldError(state, "lockedTuitionRate")}
+              >
+                <Input
+                  id="assignTuition"
+                  name="lockedTuitionRate"
+                  inputMode="decimal"
+                  value={amounts.tuition}
+                  onChange={(e) => setAmounts((v) => ({ ...v, tuition: e.target.value }))}
+                />
+              </Field>
+
+              <Field label="Scholarship" htmlFor="assignScholarshipBasis">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    id="assignScholarshipBasis"
+                    value={basis}
+                    onChange={(e) => setBasis(e.target.value as "PERCENT" | "AMOUNT")}
+                    className="w-auto"
+                  >
+                    <option value="PERCENT">Percentage of tuition</option>
+                    <option value="AMOUNT">Fixed amount</option>
+                  </Select>
+                  {basis === "PERCENT" ? (
+                    <Input
+                      name="scholarshipPercent"
+                      inputMode="numeric"
+                      defaultValue="0"
+                      className="w-28"
+                      aria-label="Scholarship percent"
+                    />
+                  ) : (
+                    <Input
+                      name="scholarshipAmount"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      className="w-40"
+                      aria-label="Scholarship amount in rupees"
+                    />
+                  )}
+                </div>
+              </Field>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Exam fee (₹)" htmlFor="assignExamFee" error={fieldError(state, "examFee")}>
+                  <Input
+                    id="assignExamFee"
+                    name="examFee"
+                    inputMode="decimal"
+                    value={amounts.examFee}
+                    onChange={(e) => setAmounts((v) => ({ ...v, examFee: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Activity fee (₹)" htmlFor="assignActivityFee" error={fieldError(state, "activityFee")}>
+                  <Input
+                    id="assignActivityFee"
+                    name="activityFee"
+                    inputMode="decimal"
+                    value={amounts.activityFee}
+                    onChange={(e) => setAmounts((v) => ({ ...v, activityFee: e.target.value }))}
+                  />
+                </Field>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Installments"
+                  htmlFor="assignInstallmentCount"
+                  required
+                  hint={`Between ${installmentMin} and ${installmentMax}.`}
+                  error={fieldError(state, "installmentCount")}
+                >
+                  <Input
+                    id="assignInstallmentCount"
+                    name="installmentCount"
+                    inputMode="numeric"
+                    required
+                    defaultValue={String(defaultInstallmentCount)}
+                  />
+                </Field>
+                <Field
+                  label="First installment due"
+                  htmlFor="assignFirstDueDate"
+                  required
+                  hint={`Every due date must land on or before ${completionDateLabel}. A date already past makes that installment overdue at once, and the late fee slabs apply.`}
+                  error={fieldError(state, "firstDueDate")}
+                >
+                  <Input
+                    id="assignFirstDueDate"
+                    name="firstDueDate"
+                    type="date"
+                    required
+                    defaultValue={defaultFirstDueDate}
+                  />
+                </Field>
+              </div>
+
+              <Field
+                label="Note (optional)"
+                htmlFor="assignNote"
+                hint="Kept on the assignment and in the audit trail — say why it was assigned by hand."
+                error={fieldError(state, "note")}
+              >
+                <Textarea
+                  id="assignNote"
+                  name="note"
+                  rows={2}
+                  placeholder="e.g. Migrated by bulk import; current year billed by hand."
+                />
+              </Field>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <SubmitButton pendingLabel="Assigning…">Assign fee</SubmitButton>
               </div>
             </>
           )}
