@@ -12,10 +12,11 @@
  *     receipt or report reads the same wherever it is generated, even if the
  *     server happens to run in UTC.
  *  2. **Arithmetic** — `startOfDay`, `daysOverdue` and friends use the process
- *     time zone, so the host must run as IST. Set `TZ=Asia/Kolkata` in the
- *     environment; `assertIstProcess()` warns loudly when it is not, because a
- *     UTC server would put a due date on the wrong side of midnight for the
- *     five and a half hours before IST midnight.
+ *     time zone, so the host must run as IST. `src/instrumentation.ts` sets it
+ *     at start-up, because Vercel reserves the `TZ` variable and its serverless
+ *     functions start in UTC; `assertIstProcess()` warns loudly if that has not
+ *     worked, because a UTC server would put a due date on the wrong side of
+ *     midnight for the five and a half hours before IST midnight.
  */
 
 /** The institute's operating time zone. Every displayed date is rendered in it. */
@@ -32,7 +33,9 @@ export function assertIstProcess(): void {
   if (zone === "Asia/Kolkata" || zone === "Asia/Calcutta") return;
   console.warn(
     `[dates] The process time zone is ${zone}, not ${TIME_ZONE}. Due dates and overdue ` +
-      `calculations follow the process zone, so set TZ=${TIME_ZONE} on the server.`,
+      `calculations follow the process zone, so this is wrong by five and a half hours. ` +
+      `src/instrumentation.ts sets it at start-up; it has either not run yet or not taken ` +
+      `effect. TZ is currently ${JSON.stringify(process.env.TZ)}.`,
   );
 }
 

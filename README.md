@@ -255,7 +255,8 @@ Then `npm run db:deploy` (against the **direct** connection string) and
   the process zone, so a server on UTC puts due dates on the wrong side of
   midnight for five and a half hours a day. Vercel reserves the variable name
   `TZ` and rejects it, so `src/instrumentation.ts` assigns it at server
-  start-up instead — Node re-reads the zone on assignment. An explicit `TZ` in
-  the environment still wins on hosts that permit one, and
-  `assertIstProcess()` warns if neither took effect.
+  start-up instead — Node re-reads the zone on assignment. The assignment is
+  unconditional: AWS Lambda, and so every Vercel function, already carries
+  `TZ=":UTC"`, so skipping when `TZ` is set means never setting it at all.
+  `assertIstProcess()` warns if it did not take effect.
 - **Session cookies are `secure` in production**, so serve over HTTPS.
