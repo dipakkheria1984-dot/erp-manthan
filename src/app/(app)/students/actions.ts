@@ -8,7 +8,13 @@ import { assertPermission } from "@/lib/auth";
 import { recordAuditTx } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
-import { balanceOf, chargeableDaysOverdue, computeLateFee, refreshInstallment } from "@/lib/late-fees";
+import {
+  balanceOf,
+  chargeableDaysOverdue,
+  computeLateFee,
+  refreshInstallment,
+  refreshInstallmentsBulk,
+} from "@/lib/late-fees";
 import { validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
 import { formatDate, fromDateInput, startOfDay } from "@/lib/dates";
 import { formatPaise, percentOf, rupeesToPaise } from "@/lib/money";
@@ -723,7 +729,14 @@ export async function updateFeeAssignmentAction(
       include: {
         semester: { select: { semesterNumber: true } },
         student: {
-          select: { id: true, studentCode: true, batch: { select: { completionDate: true } } },
+          select: {
+            id: true,
+            studentCode: true,
+            batch: { select: { completionDate: true } },
+            // Late fees are suspended while an admission is provisional, so the
+            // recomputation below needs to know.
+            application: { select: { isProvisional: true } },
+          },
         },
         installments: {
           orderBy: { seqNo: "asc" },
@@ -736,7 +749,10 @@ export async function updateFeeAssignmentAction(
     });
     if (!assignment) return fail("Fee assignment not found.");
 
-    const config = await getConfig();
+    const [config, slabs] = await Promise.all([
+      getConfig(),
+      prisma.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
+    ]);
     const student = assignment.student;
 
     // A flat concession can never exceed the tuition it is discounting; the two
@@ -840,59 +856,74 @@ export async function updateFeeAssignmentAction(
         },
       });
 
-      for (const installment of assignment.installments) {
-        if (!kept.has(installment.id)) {
-          await tx.installment.delete({ where: { id: installment.id } });
-        }
+      const removed = assignment.installments.filter((installment) => !kept.has(installment.id));
+      if (removed.length > 0) {
+        await tx.installment.deleteMany({ where: { id: { in: removed.map((i) => i.id) } } });
       }
 
-      // `seqNo` is unique per assignment, so every surviving row is parked on a
-      // negative number before the final ones are handed out — otherwise
-      // reordering or closing a gap collides with a row not yet renumbered.
-      let parked = 0;
-      for (const row of rows) {
-        if (row.id) {
-          parked += 1;
-          await tx.installment.update({ where: { id: row.id }, data: { seqNo: -parked } });
-        }
-      }
-      for (const extra of extras) {
-        parked += 1;
-        await tx.installment.update({ where: { id: extra.id }, data: { seqNo: -parked } });
-      }
+      // `seqNo` is unique per assignment, so every surviving row is parked out of
+      // the way before the final numbers are handed out — otherwise reordering or
+      // closing a gap collides with a row not yet renumbered. Negating them all
+      // at once keeps that to one statement; every row is given a positive
+      // number again below.
+      await tx.$executeRaw`
+        UPDATE "Installment" SET "seqNo" = -"seqNo"
+        WHERE "feeAssignmentId" = ${assignmentId} AND "seqNo" > 0
+      `;
 
-      const touched: string[] = [];
+      /** Every surviving row with the values it now holds, for the recompute below. */
+      const settled: { installment: (typeof assignment.installments)[number]; discountPaise: number }[] = [];
+
       for (const [index, row] of rows.entries()) {
-        if (row.id) {
-          await tx.installment.update({
-            where: { id: row.id },
-            data: { seqNo: index + 1, dueDate: row.dueDate, amountPaise: row.amountPaise },
-          });
-          touched.push(row.id);
-        } else {
-          const created = await tx.installment.create({
-            data: {
-              feeAssignmentId: assignmentId,
-              seqNo: index + 1,
-              dueDate: row.dueDate,
-              amountPaise: row.amountPaise,
-            },
-          });
-          touched.push(created.id);
+        if (!row.id) continue;
+        await tx.installment.update({
+          where: { id: row.id },
+          data: { seqNo: index + 1, dueDate: row.dueDate, amountPaise: row.amountPaise },
+        });
+        const original = existing.get(row.id)!;
+        settled.push({
+          installment: { ...original, seqNo: index + 1, dueDate: row.dueDate, amountPaise: row.amountPaise },
+          discountPaise: original.discounts.reduce((sum, discount) => sum + discount.amountPaise, 0),
+        });
+      }
+
+      const added = rows.flatMap((row, index) =>
+        row.id
+          ? []
+          : [{ feeAssignmentId: assignmentId, seqNo: index + 1, dueDate: row.dueDate, amountPaise: row.amountPaise }],
+      );
+      if (added.length > 0) {
+        // A row that has just been created carries no payments and no discounts.
+        const created = await tx.installment.createManyAndReturn({ data: added });
+        for (const installment of created) {
+          settled.push({ installment: { ...installment, payments: [], discounts: [] }, discountPaise: 0 });
         }
       }
 
       // Extra charges keep their order and follow the plan.
       for (const [index, extra] of extras.entries()) {
         await tx.installment.update({ where: { id: extra.id }, data: { seqNo: rows.length + index + 1 } });
-        touched.push(extra.id);
+        settled.push({
+          installment: { ...extra, seqNo: rows.length + index + 1 },
+          discountPaise: extra.discounts.reduce((sum, discount) => sum + discount.amountPaise, 0),
+        });
       }
 
       // Status, late fee and the cached discount all follow from the corrected
-      // amounts and dates, so every surviving row is recomputed.
-      for (const installmentId of touched) {
-        await refreshInstallment(installmentId, tx);
-      }
+      // amounts and dates, so every surviving row is recomputed — from the copies
+      // already in hand rather than a read apiece.
+      const asOf = new Date();
+      await refreshInstallmentsBulk(
+        settled.map((entry) => ({
+          installment: entry.installment,
+          asOf,
+          lateFeeExempt: student.application.isProvisional,
+          discountPaise: entry.discountPaise,
+        })),
+        slabs,
+        config,
+        tx,
+      );
 
       await recordAuditTx(tx, {
         userId: actor.id,
@@ -919,6 +950,11 @@ export async function updateFeeAssignmentAction(
           },
         },
       });
+    }, {
+      // One statement per installment is unavoidable here — each row gets its
+      // own number, date and amount — so give the round trips room rather than
+      // inherit a default that assumes a couple of queries.
+      timeout: 20_000,
     });
 
     revalidatePath(`/students/${student.id}`);

@@ -727,22 +727,38 @@ export async function commitImport(preview: ImportPreview, actorId: string): Pro
         for (const student of created) studentIds.set(student.studentCode, student.id);
       }
 
-      // Carry the old system's balance in as one clearly-labelled assignment per
-      // student holding their remaining installments, so the ledger, the Fee Due
-      // report and the reminder job are complete from day one.
+      /*
+       * Carry the old system's balance in as one clearly-labelled assignment per
+       * student holding their remaining installments, so the ledger, the Fee Due
+       * report and the reminder job are complete from day one.
+       *
+       * The balance is recorded as the assignment's tuition, not only as its
+       * total. Every screen that reads a fee assignment builds the figure back
+       * up from its parts — tuition less scholarship, plus exam and activity —
+       * and a row carrying money in `totalPayablePaise` alone contradicts its
+       * own components: the student record showed a card of zeros with a total
+       * appearing from nowhere, and the fee editor refused every save because
+       * the installments could not add up to a semester fee of zero. What the
+       * old system was owed is tuition owed; `note` keeps the provenance.
+       */
       const owing = entries.filter(({ data }) => data.installments.length > 0);
       const assignmentIds = new Map<string, string>();
       for (const batch of chunk(owing, WRITE_CHUNK)) {
         const created = await tx.feeAssignment.createManyAndReturn({
           select: { id: true, studentId: true },
-          data: batch.map(({ data, studentCode }) => ({
-            studentId: studentIds.get(studentCode)!,
-            semesterId: data.semesterId,
-            yearNumber: 1,
-            totalPayablePaise: data.installments.reduce((sum, item) => sum + item.amountPaise, 0),
-            note: "Opening balance carried over during migration",
-            createdById: actorId,
-          })),
+          data: batch.map(({ data, studentCode }) => {
+            const openingPaise = data.installments.reduce((sum, item) => sum + item.amountPaise, 0);
+            return {
+              studentId: studentIds.get(studentCode)!,
+              semesterId: data.semesterId,
+              yearNumber: 1,
+              lockedTuitionRatePaise: openingPaise,
+              tuitionComponentPaise: openingPaise,
+              totalPayablePaise: openingPaise,
+              note: "Opening balance carried over during migration",
+              createdById: actorId,
+            };
+          }),
         });
         for (const assignment of created) assignmentIds.set(assignment.studentId, assignment.id);
       }
