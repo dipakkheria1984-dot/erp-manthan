@@ -1,13 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "//regions": [
-    "The database is in Neon's ap-southeast-1 (Singapore). Vercel defaults to",
-    "iad1 (Washington DC), which puts fifteen thousand kilometres between the",
-    "app and its data — around 230ms on every query, paid ten or more times",
-    "per page. Every transaction budget in the app was being spent on the",
-    "network rather than the work. Keep this matched to the Neon region: if",
-    "the database moves, this moves with it."
-  ],
   "regions": ["sin1"],
   "crons": [
     {
