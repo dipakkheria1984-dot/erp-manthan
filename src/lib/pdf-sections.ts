@@ -228,12 +228,16 @@ export function drawReceiptCopy(
     { columns: 4, compact: true },
   );
 
-  const particularsFor = (line: ReceiptLine) =>
-    line.kind === "REGISTRATION"
-      ? "Registration / admission fee"
-      : `Installment ${line.installment?.seqNo ?? "—"} — semester ${
-          line.installment?.feeAssignment.semester.semesterNumber ?? "—"
-        }${line.installment ? ` (due ${formatDate(line.installment.dueDate)})` : ""}`;
+  const particularsFor = (line: ReceiptLine) => {
+    if (line.kind === "REGISTRATION") return "Registration / admission fee";
+    // An installment payment with nothing to point at is money the current fee
+    // structure cannot absorb — what a course change to a cheaper course leaves
+    // over. It is held against what the student is billed next.
+    if (!line.installment) return "Fee received — credit on account";
+    return `Installment ${line.installment.seqNo} — semester ${
+      line.installment.feeAssignment.semester.semesterNumber
+    } (due ${formatDate(line.installment.dueDate)})`;
+  };
 
   drawTable(
     doc,

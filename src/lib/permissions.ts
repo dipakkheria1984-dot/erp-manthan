@@ -23,6 +23,9 @@ export const PERMISSIONS = {
   ENROLLMENT_VERIFY_DOCUMENTS: "enrollment.verify_documents",
   /// Approve/reject an application — Admin only per spec 1.4.
   ENROLLMENT_APPROVE: "enrollment.approve",
+  /// Move an enrolled student to a different course, scrapping the fee
+  /// structure that came with the old one — Admin only.
+  ENROLLMENT_CHANGE_COURSE: "enrollment.change_course",
   // Module 2 — Fee assignment
   FEE_ASSIGN: "fee.assign",
   /// Approve a scholarship above the hidden threshold — Admin only (spec 2.2).
@@ -89,6 +92,7 @@ export const PERMISSION_GROUPS: { label: string; permissions: { key: Permission;
       { key: PERMISSIONS.ENROLLMENT_CREATE, label: "Create & edit applications" },
       { key: PERMISSIONS.ENROLLMENT_VERIFY_DOCUMENTS, label: "Verify uploaded documents" },
       { key: PERMISSIONS.ENROLLMENT_APPROVE, label: "Approve / reject applications" },
+      { key: PERMISSIONS.ENROLLMENT_CHANGE_COURSE, label: "Change an enrolled student's course" },
     ],
   },
   {

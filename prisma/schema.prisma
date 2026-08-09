@@ -345,6 +345,7 @@ model User {
   statusChanges         StudentStatusHistory[]
   promotionRuns         PromotionRun[]
   termsVersions         TermsVersion[]
+  courseChanges         CourseChange[]
 
   @@index([roleId])
   @@index([departmentId])
@@ -425,6 +426,9 @@ model Course {
   applications Application[]
   students     Student[]
 
+  courseChangesFrom CourseChange[] @relation("CourseChangeFromCourse")
+  courseChangesTo   CourseChange[] @relation("CourseChangeToCourse")
+
   @@index([departmentId])
 }
 
@@ -449,6 +453,9 @@ model Batch {
   applications  Application[]
   students      Student[]
   promotionRuns PromotionRun[]
+
+  courseChangesFrom CourseChange[] @relation("CourseChangeFromBatch")
+  courseChangesTo   CourseChange[] @relation("CourseChangeToBatch")
 
   @@index([courseId])
 }
@@ -721,6 +728,7 @@ model Student {
   statusHistory    StudentStatusHistory[]
   promotionEntries PromotionRunStudent[]
   notifications    NotificationLog[]
+  courseChanges    CourseChange[]
 
   @@index([batchId])
   @@index([courseId])
@@ -743,6 +751,72 @@ model StudentStatusHistory {
   changedBy User?   @relation(fields: [changedById], references: [id])
 
   @@index([studentId, changedAt])
+}
+
+/// A student moved to a different course after enrollment (Admin only).
+///
+/// The new course brings its own fee, and the old one is scrapped: every fee
+/// assignment the student held is deleted outright and a fresh one is written
+/// for the semester they join. Money already received is never touched — each
+/// payment keeps its receipt number, its date and its collector, and is
+/// re-applied to the new schedule oldest-first, so what the family has paid
+/// carries across in full.
+///
+/// Because the old structure is deleted, this row *is* the record of it:
+/// `scrappedSnapshot` holds every assignment and installment as it stood, and
+/// the figures beside it are what the student's record reads back.
+model CourseChange {
+  id          String   @id @default(cuid())
+  studentId   String
+  changedAt   DateTime @default(now())
+  changedById String?
+  /// Mandatory. The audit trail carries the same text.
+  reason      String
+
+  fromCourseId       String
+  fromBatchId        String
+  /// Semester they were sitting in. Numbers rather than a relation: the
+  /// semester rows belong to the batch they are leaving, and this has to stay
+  /// readable if that batch is ever restructured.
+  fromSemesterNumber Int?
+  toCourseId         String
+  toBatchId          String
+  toSemesterNumber   Int
+
+  // --- what was scrapped ---------------------------------------------------
+  scrappedAssignmentCount   Int   @default(0)
+  scrappedInstallmentCount  Int   @default(0)
+  scrappedTotalPayablePaise Int   @default(0)
+  /// Active discounts that died with it — they were concessions on a fee that
+  /// no longer exists, and are re-granted on the new plan if they still apply.
+  scrappedDiscountPaise     Int   @default(0)
+  /// Every scrapped assignment and installment as it stood: the only surviving
+  /// detail of a structure that has been deleted.
+  scrappedSnapshot          Json?
+
+  // --- what the money did --------------------------------------------------
+  /// Collected before the change and re-applied to the new schedule.
+  carriedPaidPaise     Int @default(0)
+  /// Late fee inside `carriedPaidPaise`. The due dates it was charged against
+  /// are gone, so it is credited as principal rather than kept as a penalty.
+  releasedLateFeePaise Int @default(0)
+  /// Part of the carried money the new fee could not absorb — a move to a
+  /// cheaper course. It stays on the student as an unapplied credit.
+  unallocatedPaise     Int @default(0)
+
+  // --- what was assigned instead -------------------------------------------
+  newTotalPayablePaise Int @default(0)
+  newInstallmentCount  Int @default(0)
+
+  student    Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  changedBy  User?   @relation(fields: [changedById], references: [id])
+  fromCourse Course  @relation("CourseChangeFromCourse", fields: [fromCourseId], references: [id])
+  toCourse   Course  @relation("CourseChangeToCourse", fields: [toCourseId], references: [id])
+  fromBatch  Batch   @relation("CourseChangeFromBatch", fields: [fromBatchId], references: [id])
+  toBatch    Batch   @relation("CourseChangeToBatch", fields: [toBatchId], references: [id])
+
+  @@index([studentId, changedAt])
+  @@index([changedAt])
 }
 
 // ---------------------------------------------------------------------------

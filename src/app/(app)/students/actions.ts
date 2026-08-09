@@ -15,8 +15,8 @@ import {
   refreshInstallment,
   refreshInstallmentsBulk,
 } from "@/lib/late-fees";
-import { validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
-import { formatDate, fromDateInput, startOfDay } from "@/lib/dates";
+import { parsePlanRows, validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
+import { formatDate, startOfDay } from "@/lib/dates";
 import { formatPaise, percentOf, rupeesToPaise } from "@/lib/money";
 import {
   checkboxInput,
@@ -673,34 +673,6 @@ const feeAssignmentSchema = z.object({
   rows: requiredText("Installments"),
   reason: reasonInput,
 });
-
-type PlanRowInput = { id: string; dueDate: Date; amountPaise: number };
-
-/** Parse the editor's rows, or say which one is wrong. */
-function parsePlanRows(raw: string): { rows: PlanRowInput[] } | { error: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { error: "The installment rows could not be read. Reload the page and try again." };
-  }
-  if (!Array.isArray(parsed)) return { error: "The installment rows could not be read." };
-
-  const rows: PlanRowInput[] = [];
-  for (const [index, entry] of parsed.entries()) {
-    const row = entry as { id?: unknown; dueDate?: unknown; amount?: unknown };
-    const dueDate = fromDateInput(String(row.dueDate ?? ""));
-    if (Number.isNaN(dueDate.getTime())) return { error: `Installment ${index + 1} needs a due date.` };
-
-    const cleaned = String(row.amount ?? "").trim().replace(/[,\s₹]/g, "");
-    const amount = Number(cleaned);
-    if (cleaned === "" || !Number.isFinite(amount)) {
-      return { error: `Installment ${index + 1} needs an amount.` };
-    }
-    rows.push({ id: typeof row.id === "string" ? row.id : "", dueDate, amountPaise: rupeesToPaise(amount) });
-  }
-  return { rows };
-}
 
 /**
  * Correct a student's assigned fee and its installment schedule.

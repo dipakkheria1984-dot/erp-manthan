@@ -59,6 +59,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const canEditProfile = hasPermission(actor.permissions, PERMISSIONS.ENROLLMENT_CREATE);
   const canEditGuardians = canEditProfile;
   const canEditFees = hasPermission(actor.permissions, PERMISSIONS.FEE_ASSIGN);
+  const canChangeCourse = hasPermission(actor.permissions, PERMISSIONS.ENROLLMENT_CHANGE_COURSE);
   const { id } = await params;
 
   const student = await prisma.student.findUnique({
@@ -70,6 +71,20 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       currentSemester: true,
       application: { include: { guardians: true } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { changedAt: "desc" } },
+      courseChanges: {
+        include: {
+          fromCourse: { select: { name: true } },
+          toCourse: { select: { name: true } },
+          fromBatch: { select: { code: true } },
+          toBatch: { select: { code: true } },
+          changedBy: { select: { name: true } },
+        },
+        orderBy: { changedAt: "desc" },
+      },
+      // Read at student level rather than through the installments: a course
+      // change can leave money the new fee could not absorb sitting on the
+      // record with nothing to point at, and it is still the family's.
+      payments: { where: { status: "ACTIVE" }, select: { amountPaise: true, installmentId: true } },
       feeAssignments: {
         include: {
           semester: true,
@@ -90,8 +105,11 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const waived = allInstallments
     .filter((i) => i.status === "WAIVED")
     .reduce((sum, i) => sum + i.amountPaise, 0);
-  const paid = allInstallments
-    .flatMap((i) => i.payments)
+  const paid = student.payments.reduce((sum, p) => sum + p.amountPaise, 0);
+  // Money received with no installment to settle — what a move to a cheaper
+  // course leaves over. It counts as paid and waits for the next semester's bill.
+  const unappliedCredit = student.payments
+    .filter((p) => p.installmentId === null)
     .reduce((sum, p) => sum + p.amountPaise, 0);
   const lateFees = allInstallments
     .filter((i) => i.status !== "WAIVED")
@@ -247,6 +265,11 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
                 defaultAssignmentId={defaultAssignmentId}
               />
             ) : null}
+            {canChangeCourse && student.status === "ACTIVE" ? (
+              <LinkButton href={`/enrollment/course-change?studentId=${student.id}`} variant="secondary">
+                Change course
+              </LinkButton>
+            ) : null}
             {canChangeStatus ? (
               <>
                 <BacklogToggle studentId={student.id} hasBacklog={student.hasBacklog} />
@@ -259,7 +282,12 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Fees assigned" value={formatPaise(assigned)} />
-        <StatTile label="Paid" value={formatPaise(paid)} tone="success" />
+        <StatTile
+          label="Paid"
+          value={formatPaise(paid)}
+          tone="success"
+          hint={unappliedCredit > 0 ? `Includes ${formatPaise(unappliedCredit)} held as credit` : undefined}
+        />
         <StatTile
           label="Discounted"
           value={formatPaise(discounted)}
@@ -365,6 +393,71 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
             </TableWrap>
           )}
         </Card>
+
+        {/* The fee structures these changes scrapped were deleted outright, so
+            this is the only place left that says what they were. */}
+        {student.courseChanges.length > 0 ? (
+          <Card
+            title="Course changes"
+            description="Each one scrapped the fee assigned for the old course and re-applied everything collected to the new one."
+          >
+            <TableWrap>
+              <thead>
+                <tr>
+                  <Th>When</Th>
+                  <Th>From → To</Th>
+                  <Th className="text-right">Fee scrapped</Th>
+                  <Th className="text-right">Fee assigned</Th>
+                  <Th className="text-right">Payments carried</Th>
+                  <Th>Reason</Th>
+                  <Th>Changed by</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {student.courseChanges.map((change) => (
+                  <Tr key={change.id}>
+                    <Td className="whitespace-nowrap text-muted">{formatDate(change.changedAt)}</Td>
+                    <Td>
+                      {change.fromCourse.name} ({change.fromBatch.code})
+                      {change.fromSemesterNumber ? ` · sem ${change.fromSemesterNumber}` : ""}
+                      <span className="block text-xs text-muted">
+                        → {change.toCourse.name} ({change.toBatch.code}) · sem {change.toSemesterNumber}
+                      </span>
+                    </Td>
+                    <Td className="text-right tabular-nums">
+                      {formatPaise(change.scrappedTotalPayablePaise)}
+                      <span className="block text-xs text-muted">
+                        {change.scrappedInstallmentCount} installment(s)
+                        {change.scrappedDiscountPaise > 0
+                          ? `, ${formatPaise(change.scrappedDiscountPaise)} discounted`
+                          : ""}
+                      </span>
+                    </Td>
+                    <Td className="text-right tabular-nums">
+                      {formatPaise(change.newTotalPayablePaise)}
+                      <span className="block text-xs text-muted">{change.newInstallmentCount} installment(s)</span>
+                    </Td>
+                    <Td className="text-right tabular-nums">
+                      {formatPaise(change.carriedPaidPaise)}
+                      {change.unallocatedPaise > 0 ? (
+                        <span className="block text-xs text-muted">
+                          {formatPaise(change.unallocatedPaise)} held as credit
+                        </span>
+                      ) : null}
+                      {change.releasedLateFeePaise > 0 ? (
+                        <span className="block text-xs text-muted">
+                          incl. {formatPaise(change.releasedLateFeePaise)} late fee credited
+                        </span>
+                      ) : null}
+                    </Td>
+                    <Td className="max-w-xs">{change.reason}</Td>
+                    <Td className="text-muted">{change.changedBy?.name ?? "—"}</Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </TableWrap>
+          </Card>
+        ) : null}
 
         {student.statusHistory.length > 0 ? (
           <Card title="Status history">

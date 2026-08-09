@@ -1,8 +1,8 @@
 import "server-only";
 import { prisma, type Db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
-import { addMonths, daysBetween, startOfDay } from "@/lib/dates";
-import { formatPaise, splitPaise } from "@/lib/money";
+import { addMonths, daysBetween, fromDateInput, startOfDay } from "@/lib/dates";
+import { formatPaise, rupeesToPaise, splitPaise } from "@/lib/money";
 
 /**
  * Fee rules shared by enrollment, promotion and collection.
@@ -40,6 +40,42 @@ export function currentTuitionRate(batchId: string, db: Db = prisma): Promise<nu
 }
 
 export type InstallmentDraft = { seqNo: number; dueDate: Date; amountPaise: number };
+
+/** One row as the installment editors post it. `id` is empty on a new row. */
+export type PlanRowInput = { id: string; dueDate: Date; amountPaise: number };
+
+/**
+ * Parse the JSON an installment editor posts — `[{ id?, dueDate, amount }]` —
+ * or say which row is wrong.
+ *
+ * Every screen that lets someone lay out a schedule by hand sends the same
+ * shape: correcting an assigned fee, filling a gap for an imported student, and
+ * billing the course a student has moved to.
+ */
+export function parsePlanRows(raw: string): { rows: PlanRowInput[] } | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { error: "The installment rows could not be read. Reload the page and try again." };
+  }
+  if (!Array.isArray(parsed)) return { error: "The installment rows could not be read." };
+
+  const rows: PlanRowInput[] = [];
+  for (const [index, entry] of parsed.entries()) {
+    const row = entry as { id?: unknown; dueDate?: unknown; amount?: unknown };
+    const dueDate = fromDateInput(String(row.dueDate ?? ""));
+    if (Number.isNaN(dueDate.getTime())) return { error: `Installment ${index + 1} needs a due date.` };
+
+    const cleaned = String(row.amount ?? "").trim().replace(/[,\s₹]/g, "");
+    const amount = Number(cleaned);
+    if (cleaned === "" || !Number.isFinite(amount)) {
+      return { error: `Installment ${index + 1} needs an amount.` };
+    }
+    rows.push({ id: typeof row.id === "string" ? row.id : "", dueDate, amountPaise: rupeesToPaise(amount) });
+  }
+  return { rows };
+}
 
 /**
  * Spread `totalPayablePaise` over `count` monthly installments starting at

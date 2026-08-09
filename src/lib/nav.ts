@@ -29,6 +29,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Applications", href: "/enrollment", anyOf: [PERMISSIONS.ENROLLMENT_VIEW] },
       { label: "New application", href: "/enrollment/new", anyOf: [PERMISSIONS.ENROLLMENT_CREATE] },
       { label: "Students", href: "/students", anyOf: [PERMISSIONS.STUDENT_VIEW] },
+      { label: "Course change", href: "/enrollment/course-change", anyOf: [PERMISSIONS.ENROLLMENT_CHANGE_COURSE] },
       { label: "Bulk import", href: "/students/import", anyOf: [PERMISSIONS.STUDENT_IMPORT] },
     ],
   },
