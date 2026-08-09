@@ -196,7 +196,7 @@ export function ReportFilters({
           <Field
             label="Dues to show"
             htmlFor="dueStatus"
-            hint="“Due now” lists only students with something payable today. “Due this month” lists installments falling due this calendar month, and adds a Due This Month column."
+            hint="“Due now” lists only students with something payable today. “Due this month” does the same against the end of this calendar month — Current Dues run to the month's end, so arrears carried in from earlier months count too."
           >
             <Select id="dueStatus" name="dueStatus" defaultValue={defaults.dueStatus ?? ""}>
               <option value="">All dues</option>

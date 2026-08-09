@@ -142,11 +142,23 @@ const GUARDIAN_RELATION: Record<string, string> = {
  * has not. Late fee only ever accrues on the current side, so Current Payable
  * is what the office should actually ask for today.
  *
- * `dueStatus=month` cuts across that split: it lists the students with an
- * installment falling due in the current calendar month, whichever side of today
- * it sits, and adds a Due This Month column for that slice. It is the month's
- * collection worklist — arrears carried in from earlier months are not part of
- * it, and are reached through "Due now only" and the overdue buckets instead.
+ * `dueStatus=month` moves that boundary from today to the end of the current
+ * calendar month, because the question it answers is what the month has to
+ * collect rather than what the counter can ask for this morning. Current Dues
+ * becomes everything falling due on or before the month ends — arrears carried
+ * in from earlier months included — and Future Dues everything falling due
+ * after it. The three identities above are unaffected: the boundary moves, the
+ * split stays exhaustive.
+ *
+ * Which students are listed follows the same moved boundary, so the option is
+ * "Due now only" measured against the month's end: anyone with anything payable
+ * by then, whether it falls due this month or was carried in. The month's
+ * collectable total is the point, and a family two months behind belongs on it.
+ *
+ * A Due This Month column comes with it, holding the narrower figure: only the
+ * installments whose due date lands inside this month. Current Dues less that
+ * column is therefore what came in as arrears, and a row showing zero there is
+ * a student who owes nothing new this month but has not cleared what they owed.
  */
 export async function feeDueReport(params: ReportParams): Promise<ReportResult> {
   const config = await getConfig();
@@ -160,6 +172,9 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
   const monthStart = startOfMonth(now);
   const monthEnd = endOfMonth(now);
   const byMonth = params.dueStatus === "month";
+  // Where Current Dues stops and Future Dues starts. Today on every other run;
+  // the end of this month when the month's collection is what is being asked for.
+  const dueCutoff = byMonth ? monthEnd : dueBy;
   const from = params.from ? fromDateInput(params.from) : null;
   const to = params.to ? endOfDay(fromDateInput(params.to)) : null;
 
@@ -230,10 +245,10 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
         lateFee += balance.lateFeeOutstandingPaise;
 
         if (balance.principalOutstandingPaise > 0) {
-          if (installment.dueDate <= dueBy) currentDues += balance.principalOutstandingPaise;
+          if (installment.dueDate <= dueCutoff) currentDues += balance.principalOutstandingPaise;
           else futureDues += balance.principalOutstandingPaise;
-          // Falls due this calendar month — part of it already due, part still
-          // to come, which is exactly the month's collection target.
+          // The narrower figure: due date inside this month, so arrears from
+          // earlier months are left out even though they count as current.
           if (installment.dueDate >= monthStart && installment.dueDate <= monthEnd) {
             dueThisMonth += balance.principalOutstandingPaise;
           }
@@ -257,7 +272,12 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
     if ((from || to) && !dueInRange) continue;
     if (params.dueStatus === "current" && currentPayable <= 0) continue;
     if (params.dueStatus === "future" && currentPayable > 0) continue;
-    if (byMonth && dueThisMonth <= 0) continue;
+    // The same test as "Due now only", against the moved boundary: anything
+    // outstanding by the month's end puts a student on the list, whether it
+    // falls due this month or was carried in as arrears. `currentPayable`
+    // rather than `currentDues` so a student left owing only a late fee is
+    // still chased for it.
+    if (byMonth && currentPayable <= 0) continue;
     if (params.lateFeeOnly === "with" && lateFee <= 0) continue;
     if (params.lateFeeOnly === "without" && lateFee > 0) continue;
 
@@ -303,11 +323,12 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
   }
 
   // Whoever works this list starts at the top, so the biggest amount collectable
-  // today comes first — or, on the month's worklist, the biggest amount falling
-  // due this month, which is what that list is being worked for.
+  // by the cutoff comes first. That needs no special case for the month's run:
+  // `currentPayable` is already measured against whichever boundary is in force,
+  // so sorting on it means "collectable today" normally and "collectable by the
+  // month's end" there.
   entries.sort(
     (a, b) =>
-      (byMonth ? b.dueThisMonth - a.dueThisMonth : 0) ||
       b.currentPayable - a.currentPayable ||
       b.totalPayable - a.totalPayable ||
       a.studentCode.localeCompare(b.studentCode),
@@ -325,8 +346,8 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
         : byMonth
           ? // The month is named, not left as "this month": a printed or emailed
             // copy read weeks later must still say which month it covers.
-            `Due this month — only installments falling due in ${monthLabel} ` +
-            `(${formatDate(monthStart)} to ${formatDate(monthEnd)}) put a student on this list`
+            `Due this month — ${monthLabel} (${formatDate(monthStart)} to ${formatDate(monthEnd)}). ` +
+            "Current Dues run to the end of the month, not to today; students with nothing payable by then are excluded"
           : null;
 
   return {
@@ -347,13 +368,14 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
       { key: "totalFees", header: "Total Fees", width: 58, align: "right", money: true },
       { key: "totalPaid", header: "Total Paid", width: 58, align: "right", money: true },
       { key: "currentDues", header: "Current Dues", width: 58, align: "right", money: true },
-      { key: "futureDues", header: "Future Dues", width: 58, align: "right", money: true },
-      // Only on the month's worklist. It is a slice across Current and Future
-      // Dues rather than a fourth part of them, so carrying it on every run
-      // would sit awkwardly beside the reconciliation the other columns state.
+      // Sits next to Current Dues because it is the part of it that falls due
+      // inside this month; the rest is arrears. Only on the month's run — on
+      // every other one the Current/Future boundary is today, and a month
+      // column beside it would invite the two to be read as one split.
       ...(byMonth
         ? [{ key: "dueThisMonth", header: "Due This Month", width: 62, align: "right" as const, money: true }]
         : []),
+      { key: "futureDues", header: "Future Dues", width: 58, align: "right", money: true },
       { key: "lateFee", header: "Late Fee", width: 50, align: "right", money: true },
       { key: "currentPayable", header: "Current Payable", width: 62, align: "right", money: true },
       { key: "totalPayable", header: "Total Payable", width: 62, align: "right", money: true },
@@ -386,16 +408,22 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
       "Dropped-out and expelled students are excluded — their dues are waived",
     ],
     notes: [
-      "One row per student — every outstanding installment is combined. Current Dues are those whose due date has " +
-        "arrived; Future Dues are not yet due. Current Payable = Current Dues + Late Fee, and is what to collect today.",
+      byMonth
+        ? `One row per student — every outstanding installment is combined. On this run the line between Current and ` +
+          `Future Dues is the end of ${monthLabel}, not today: Current Dues are everything falling due on or before ` +
+          `${formatDate(monthEnd)}, arrears from earlier months included, and Future Dues everything falling due ` +
+          `after it. Current Payable = Current Dues + Late Fee, and is the month's collection target.`
+        : "One row per student — every outstanding installment is combined. Current Dues are those whose due date has " +
+          "arrived; Future Dues are not yet due. Current Payable = Current Dues + Late Fee, and is what to collect today.",
       "Total Fees is net of discounts and waivers, so each row reconciles: Total Fees = Total Paid + Current Dues + " +
         "Future Dues. The gross charge and every concession are on the Student Ledger.",
       ...(byMonth
         ? [
-            `Due This Month is what falls due between ${formatDate(monthStart)} and ${formatDate(monthEnd)} and is ` +
-              "still unpaid — part of it already due, part still to come. Arrears carried in from earlier months are " +
-              "not counted in it, though the student's other columns still show them: use “Due now only” or an " +
-              "overdue bucket to work those.",
+            `Due This Month is the narrower figure: only what falls due between ${formatDate(monthStart)} and ` +
+              `${formatDate(monthEnd)} and is still unpaid. Current Dues less Due This Month is therefore the arrears ` +
+              "brought in from earlier months, and a row showing zero there is a student who owes nothing new this " +
+              "month but has not cleared what they already owed. Everyone with anything payable by the month's end " +
+              "is listed, either way.",
           ]
         : []),
     ],
