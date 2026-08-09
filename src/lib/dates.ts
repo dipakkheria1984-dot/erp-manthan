@@ -51,6 +51,21 @@ export function endOfDay(date: Date): Date {
   return d;
 }
 
+/** Local midnight on the 1st of `date`'s month. */
+export function startOfMonth(date: Date): Date {
+  const d = startOfDay(date);
+  d.setDate(1);
+  return d;
+}
+
+/** The last instant of `date`'s month, so a due date on the 31st still falls inside it. */
+export function endOfMonth(date: Date): Date {
+  const d = startOfMonth(date);
+  d.setMonth(d.getMonth() + 1);
+  d.setDate(0);
+  return endOfDay(d);
+}
+
 export function addDays(date: Date, days: number): Date {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
@@ -82,6 +97,11 @@ export function formatDate(date: Date | string | null | undefined): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: TIME_ZONE });
+}
+
+/** "August 2026" — names the month a report was run for, on screen and in exports. */
+export function formatMonth(date: Date): string {
+  return date.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: TIME_ZONE });
 }
 
 export function formatDateTime(date: Date | string | null | undefined): string {

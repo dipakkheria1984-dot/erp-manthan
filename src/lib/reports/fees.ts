@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { balanceOf, overdueBucket } from "@/lib/late-fees";
-import { endOfDay, formatDate, fromDateInput } from "@/lib/dates";
+import { endOfDay, endOfMonth, formatDate, formatMonth, fromDateInput, startOfMonth } from "@/lib/dates";
 import { formatPaisePlain } from "@/lib/money";
 import { discountReasonLabel, extraChargeKindLabel, installmentStatusLabel } from "@/lib/students";
 import { buildFilterSummary } from "./academic";
@@ -141,6 +141,12 @@ const GUARDIAN_RELATION: Record<string, string> = {
  * "Current" means the due date has arrived (today included); "Future" means it
  * has not. Late fee only ever accrues on the current side, so Current Payable
  * is what the office should actually ask for today.
+ *
+ * `dueStatus=month` cuts across that split: it lists the students with an
+ * installment falling due in the current calendar month, whichever side of today
+ * it sits, and adds a Due This Month column for that slice. It is the month's
+ * collection worklist — arrears carried in from earlier months are not part of
+ * it, and are reached through "Due now only" and the overdue buckets instead.
  */
 export async function feeDueReport(params: ReportParams): Promise<ReportResult> {
   const config = await getConfig();
@@ -151,6 +157,9 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
 
   const now = new Date();
   const dueBy = endOfDay(now);
+  const monthStart = startOfMonth(now);
+  const monthEnd = endOfMonth(now);
+  const byMonth = params.dueStatus === "month";
   const from = params.from ? fromDateInput(params.from) : null;
   const to = params.to ? endOfDay(fromDateInput(params.to)) : null;
 
@@ -191,6 +200,7 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
     totalPaid: number;
     currentDues: number;
     futureDues: number;
+    dueThisMonth: number;
     lateFee: number;
     currentPayable: number;
     totalPayable: number;
@@ -203,6 +213,7 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
     let totalPaid = 0;
     let currentDues = 0;
     let futureDues = 0;
+    let dueThisMonth = 0;
     let lateFee = 0;
     let maxDaysOverdue = 0;
     let nextDue: Date | null = null;
@@ -221,6 +232,11 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
         if (balance.principalOutstandingPaise > 0) {
           if (installment.dueDate <= dueBy) currentDues += balance.principalOutstandingPaise;
           else futureDues += balance.principalOutstandingPaise;
+          // Falls due this calendar month — part of it already due, part still
+          // to come, which is exactly the month's collection target.
+          if (installment.dueDate >= monthStart && installment.dueDate <= monthEnd) {
+            dueThisMonth += balance.principalOutstandingPaise;
+          }
         }
 
         if (balance.totalOutstandingPaise > 0) {
@@ -241,6 +257,7 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
     if ((from || to) && !dueInRange) continue;
     if (params.dueStatus === "current" && currentPayable <= 0) continue;
     if (params.dueStatus === "future" && currentPayable > 0) continue;
+    if (byMonth && dueThisMonth <= 0) continue;
     if (params.lateFeeOnly === "with" && lateFee <= 0) continue;
     if (params.lateFeeOnly === "without" && lateFee > 0) continue;
 
@@ -268,6 +285,7 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
         totalPaid: formatPaisePlain(totalPaid),
         currentDues: formatPaisePlain(currentDues),
         futureDues: formatPaisePlain(futureDues),
+        dueThisMonth: formatPaisePlain(dueThisMonth),
         lateFee: formatPaisePlain(lateFee),
         currentPayable: formatPaisePlain(currentPayable),
         totalPayable: formatPaisePlain(totalPayable),
@@ -276,6 +294,7 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
       totalPaid,
       currentDues,
       futureDues,
+      dueThisMonth,
       lateFee,
       currentPayable,
       totalPayable,
@@ -284,9 +303,11 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
   }
 
   // Whoever works this list starts at the top, so the biggest amount collectable
-  // today comes first.
+  // today comes first — or, on the month's worklist, the biggest amount falling
+  // due this month, which is what that list is being worked for.
   entries.sort(
     (a, b) =>
+      (byMonth ? b.dueThisMonth - a.dueThisMonth : 0) ||
       b.currentPayable - a.currentPayable ||
       b.totalPayable - a.totalPayable ||
       a.studentCode.localeCompare(b.studentCode),
@@ -295,12 +316,18 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
   const sum = (key: Exclude<keyof DueEntry, "row" | "studentCode">) =>
     entries.reduce((total, entry) => total + entry[key], 0);
 
+  const monthLabel = formatMonth(now);
   const dueStatusLabel =
     params.dueStatus === "current"
       ? "Due now only — students with nothing payable today are excluded"
       : params.dueStatus === "future"
         ? "Not yet due only — students with anything payable today are excluded"
-        : null;
+        : byMonth
+          ? // The month is named, not left as "this month": a printed or emailed
+            // copy read weeks later must still say which month it covers.
+            `Due this month — only installments falling due in ${monthLabel} ` +
+            `(${formatDate(monthStart)} to ${formatDate(monthEnd)}) put a student on this list`
+          : null;
 
   return {
     title: "Fee Due",
@@ -321,6 +348,12 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
       { key: "totalPaid", header: "Total Paid", width: 58, align: "right", money: true },
       { key: "currentDues", header: "Current Dues", width: 58, align: "right", money: true },
       { key: "futureDues", header: "Future Dues", width: 58, align: "right", money: true },
+      // Only on the month's worklist. It is a slice across Current and Future
+      // Dues rather than a fourth part of them, so carrying it on every run
+      // would sit awkwardly beside the reconciliation the other columns state.
+      ...(byMonth
+        ? [{ key: "dueThisMonth", header: "Due This Month", width: 62, align: "right" as const, money: true }]
+        : []),
       { key: "lateFee", header: "Late Fee", width: 50, align: "right", money: true },
       { key: "currentPayable", header: "Current Payable", width: 62, align: "right", money: true },
       { key: "totalPayable", header: "Total Payable", width: 62, align: "right", money: true },
@@ -342,6 +375,7 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
       totalPaid: formatPaisePlain(sum("totalPaid")),
       currentDues: formatPaisePlain(sum("currentDues")),
       futureDues: formatPaisePlain(sum("futureDues")),
+      dueThisMonth: formatPaisePlain(sum("dueThisMonth")),
       lateFee: formatPaisePlain(sum("lateFee")),
       currentPayable: formatPaisePlain(sum("currentPayable")),
       totalPayable: formatPaisePlain(sum("totalPayable")),
@@ -356,6 +390,14 @@ export async function feeDueReport(params: ReportParams): Promise<ReportResult> 
         "arrived; Future Dues are not yet due. Current Payable = Current Dues + Late Fee, and is what to collect today.",
       "Total Fees is net of discounts and waivers, so each row reconciles: Total Fees = Total Paid + Current Dues + " +
         "Future Dues. The gross charge and every concession are on the Student Ledger.",
+      ...(byMonth
+        ? [
+            `Due This Month is what falls due between ${formatDate(monthStart)} and ${formatDate(monthEnd)} and is ` +
+              "still unpaid — part of it already due, part still to come. Arrears carried in from earlier months are " +
+              "not counted in it, though the student's other columns still show them: use “Due now only” or an " +
+              "overdue bucket to work those.",
+          ]
+        : []),
     ],
   };
 }
