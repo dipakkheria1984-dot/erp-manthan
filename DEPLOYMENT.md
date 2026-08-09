@@ -34,6 +34,15 @@ real one — the seed refuses to run with the built-in default when
 
 1. At [neon.tech](https://neon.tech), create a project. Pick a region near your
    users (`ap-south-1`, Mumbai, for an institute in India).
+
+   **Then point Vercel at the same region.** `regions` in `vercel.json` pins
+   where the functions run; it ships set to `sin1` for a database in
+   `ap-southeast-1`. Vercel's own default is `iad1`, in Washington DC, and
+   leaving it there while the database sits in Asia puts roughly 230ms on
+   every single query — paid ten or more times per page, and enough on its own
+   to exhaust the time limit on anything that writes in bulk. The mapping is
+   `ap-south-1` → `bom1`, `ap-southeast-1` → `sin1`, `us-east-1` → `iad1`.
+   If the database ever moves, move this with it.
 2. From the dashboard copy **both** connection strings:
    - **Pooled** — the host contains `-pooler`. This is `DATABASE_URL` for the app.
    - **Direct** — no `-pooler`. Migrations need this one.
