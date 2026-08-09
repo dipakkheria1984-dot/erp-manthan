@@ -91,8 +91,14 @@ export async function changeStudentStatusAction(_prev: unknown, formData: FormDa
           const paid = installment.payments.reduce((sum, p) => sum + p.amountPaise, 0);
           waivedAmount += Math.max(0, installment.amountPaise - paid) + installment.lateFeePaise;
           waivedCount += 1;
-          await tx.installment.update({
-            where: { id: installment.id },
+        }
+
+        // Every row is waived on the same terms, so one statement does it —
+        // a student part-way through a long course can carry dozens, and a
+        // round trip each is what put this over the transaction's budget.
+        if (pending.length > 0) {
+          await tx.installment.updateMany({
+            where: { id: { in: pending.map((installment) => installment.id) } },
             data: {
               status: "WAIVED",
               waivedAt: new Date(),
@@ -1166,7 +1172,13 @@ export async function grantDiscountAction(_prev: unknown, formData: FormData): P
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, studentCode: true, status: true },
+      select: {
+        id: true,
+        studentCode: true,
+        status: true,
+        // Late fees are suspended while an admission is provisional.
+        application: { select: { isProvisional: true } },
+      },
     });
     if (!student) return fail("Student not found.");
     if (student.status !== "ACTIVE" && student.status !== "PASSED") {
@@ -1246,23 +1258,44 @@ export async function grantDiscountAction(_prev: unknown, formData: FormData): P
     if (shares.length === 0) return fail("That works out to nothing on any installment.");
     const granted = shares.reduce((sum, share) => sum + share.amountPaise, 0);
 
+    const [slabs, config] = await Promise.all([
+      prisma.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
+      getConfig(),
+    ]);
+    const exempt = student.application.isProvisional;
+
     await prisma.$transaction(async (tx) => {
-      for (const share of shares) {
-        await tx.discount.create({
-          data: {
-            installmentId: share.installment.id,
-            studentId: student.id,
-            reason,
-            percent,
-            amountPaise: share.amountPaise,
-            note,
-            grantedById: actor.id,
-          },
-        });
-        // Recomputes the cached discount, the status and the late fee, which now
-        // accrues on the reduced balance.
-        await refreshInstallment(share.installment.id, tx);
-      }
+      await tx.discount.createMany({
+        data: shares.map((share) => ({
+          installmentId: share.installment.id,
+          studentId: student.id,
+          reason,
+          percent,
+          amountPaise: share.amountPaise,
+          note,
+          grantedById: actor.id,
+        })),
+      });
+
+      // Recomputes the cached discount, the status and the late fee, which now
+      // accrues on the reduced balance. A concession across a whole balance can
+      // touch every unpaid installment, so the rows go together rather than a
+      // read and a write apiece.
+      const asOf = new Date();
+      await refreshInstallmentsBulk(
+        shares.map((share) => ({
+          installment: share.installment,
+          asOf,
+          lateFeeExempt: exempt,
+          // The row just written is not on the copy in hand, so add it to
+          // whatever was already granted against this installment.
+          discountPaise:
+            share.installment.discounts.reduce((sum, discount) => sum + discount.amountPaise, 0) + share.amountPaise,
+        })),
+        slabs,
+        config,
+        tx,
+      );
 
       const where =
         shares.length === 1

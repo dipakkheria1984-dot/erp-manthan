@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
+import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
@@ -88,7 +89,17 @@ export async function destroyAllSessionsFor(userId: string): Promise<void> {
   await prisma.session.deleteMany({ where: { userId } });
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+/**
+ * The signed-in user, or null.
+ *
+ * Memoised for the life of one request. The app layout resolves the session to
+ * build the navigation, and then every page guard resolves it again — three or
+ * four identical lookups before a page has fetched any of its own data. Against
+ * a database in another region that is most of a second spent re-answering the
+ * same question. `cache` is request-scoped, so a sign-in or sign-out in one
+ * request is never seen by another.
+ */
+export const getSessionUser = cache(async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -112,7 +123,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     departmentId: session.user.departmentId,
     mustResetPassword: session.user.mustResetPassword,
   };
-}
+});
 
 export async function requireUser(): Promise<SessionUser> {
   const user = await getSessionUser();

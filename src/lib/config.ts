@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { prisma, type Db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { readStoredFile } from "@/lib/storage";
@@ -13,13 +14,20 @@ import type { InstituteConfig, Institute, CommunicationConfig } from "@/generate
  * business logic or Admin-only pages.
  */
 
-export async function getConfig(db: Db = prisma): Promise<InstituteConfig> {
+/**
+ * Memoised for the life of one request. A page, the components under it and the
+ * helpers they call ask for the configuration independently — the same single
+ * row fetched five or six times before anything is rendered, each one a round
+ * trip to whichever region the database lives in. `cache` keys on the argument,
+ * so a call inside a transaction is still answered by that transaction.
+ */
+export const getConfig = cache(async function getConfig(db: Db = prisma): Promise<InstituteConfig> {
   const config = await db.instituteConfig.findUnique({ where: { id: 1 } });
   if (!config) {
     throw new AppError("Institute configuration has not been initialised. Run the seed first.");
   }
   return config;
-}
+});
 
 export type PublicConfig = Omit<InstituteConfig, "scholarshipAutoApprovePercent">;
 
@@ -30,13 +38,13 @@ export async function getPublicConfig(db: Db = prisma): Promise<PublicConfig> {
   return rest;
 }
 
-export async function getInstitute(db: Db = prisma): Promise<Institute> {
+export const getInstitute = cache(async function getInstitute(db: Db = prisma): Promise<Institute> {
   const institute = await db.institute.findUnique({ where: { id: 1 } });
   if (!institute) {
     throw new AppError("Institute profile has not been initialised. Run the seed first.");
   }
   return institute;
-}
+});
 
 /**
  * The uploaded logo's bytes, ready to be embedded in a PDF letterhead.

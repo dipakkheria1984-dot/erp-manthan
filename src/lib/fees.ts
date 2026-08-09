@@ -194,6 +194,16 @@ export async function reflowInstallmentsForBatch(
   let couldNotFit = 0;
   const today = startOfDay(new Date());
 
+  /*
+   * Every plan is re-spread across the same window by the same rule, so the
+   * dates that come out repeat heavily from one student to the next. Grouping
+   * by the date lands a whole batch in a handful of statements: shortening a
+   * completion date can touch hundreds of installments, and a write apiece —
+   * inside the transaction that is changing the batch — was more than it could
+   * hold.
+   */
+  const byNewDate = new Map<number, string[]>();
+
   for (const [, items] of byAssignment) {
     const windowStart = today < end ? today : end;
     const span = daysBetween(windowStart, end);
@@ -203,9 +213,14 @@ export async function reflowInstallmentsForBatch(
       const offset = items.length === 1 ? span : Math.round((span * (i + 1)) / items.length);
       const dueDate = new Date(windowStart);
       dueDate.setDate(dueDate.getDate() + Math.max(0, offset));
-      await db.installment.update({ where: { id: items[i].id }, data: { dueDate } });
+      const key = dueDate.getTime();
+      byNewDate.set(key, [...(byNewDate.get(key) ?? []), items[i].id]);
       adjusted += 1;
     }
+  }
+
+  for (const [time, ids] of byNewDate) {
+    await db.installment.updateMany({ where: { id: { in: ids } }, data: { dueDate: new Date(time) } });
   }
 
   return { adjusted, couldNotFit };

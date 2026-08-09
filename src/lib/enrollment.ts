@@ -3,7 +3,7 @@ import { prisma, type Db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { recordAudit, recordAuditTx } from "@/lib/audit";
 import { tuitionRateAt } from "@/lib/fees";
-import { refreshInstallment } from "@/lib/late-fees";
+import { refreshInstallment, refreshInstallmentsBulk } from "@/lib/late-fees";
 import { formatPaise, percentOf } from "@/lib/money";
 import type {
   Application,
@@ -221,6 +221,53 @@ export async function feePreview(
 }
 
 /**
+ * Bring a student's open installments back in line after the late-fee exemption
+ * that provisional admission carries is turned on or off.
+ *
+ * Every one of them changes on the same terms, so they are read once and written
+ * together — a student part-way through a long course has dozens, and a query
+ * apiece was enough to exhaust the transaction this runs inside when a receipt
+ * is cancelled.
+ */
+async function refreshOpenInstallments(studentId: string, lateFeeExempt: boolean, db: Db): Promise<void> {
+  const [open, slabs, config, discounts] = await Promise.all([
+    db.installment.findMany({
+      where: { feeAssignment: { studentId }, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
+      include: { payments: true },
+    }),
+    db.lateFeeSlab.findMany({ where: { isActive: true }, orderBy: { minDaysOverdue: "asc" } }),
+    getConfig(db),
+    db.discount.findMany({
+      where: { installment: { feeAssignment: { studentId } }, cancelledAt: null },
+      select: { installmentId: true, amountPaise: true },
+    }),
+  ]);
+  if (open.length === 0) return;
+
+  const discountByInstallment = new Map<string, number>();
+  for (const discount of discounts) {
+    if (!discount.installmentId) continue;
+    discountByInstallment.set(
+      discount.installmentId,
+      (discountByInstallment.get(discount.installmentId) ?? 0) + discount.amountPaise,
+    );
+  }
+
+  const asOf = new Date();
+  await refreshInstallmentsBulk(
+    open.map((installment) => ({
+      installment,
+      asOf,
+      lateFeeExempt,
+      discountPaise: discountByInstallment.get(installment.id) ?? 0,
+    })),
+    slabs,
+    config,
+    db,
+  );
+}
+
+/**
  * Provisional admission ends by itself once the money that made it provisional
  * arrives (spec 1.4). Called after every registration-fee collection and every
  * installment payment.
@@ -265,11 +312,7 @@ export async function settleProvisionalAdmission(
   // Late fees were suspended while the admission was provisional; now that it is
   // confirmed, bring the cached figures back in line with the live rules.
   if (application.student) {
-    const open = await prisma.installment.findMany({
-      where: { feeAssignment: { studentId: application.student.id }, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
-      select: { id: true },
-    });
-    for (const installment of open) await refreshInstallment(installment.id);
+    await refreshOpenInstallments(application.student.id, false, prisma);
   }
 
   await recordAudit({
@@ -337,11 +380,7 @@ export async function reinstateProvisionalAdmission(
   await db.application.update({ where: { id: applicationId }, data: { isProvisional: true } });
 
   if (application.student) {
-    const open = await db.installment.findMany({
-      where: { feeAssignment: { studentId: application.student.id }, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
-      select: { id: true },
-    });
-    for (const installment of open) await refreshInstallment(installment.id, db);
+    await refreshOpenInstallments(application.student.id, true, db);
   }
 
   await recordAuditTx(db, {

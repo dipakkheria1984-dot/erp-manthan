@@ -8,7 +8,7 @@ import { recordAuditTx } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
-import { buildInstallmentPlan, tuitionRateAt } from "@/lib/fees";
+import { buildInstallmentPlan } from "@/lib/fees";
 import { percentOf } from "@/lib/money";
 import { dateInput, fieldErrorsOf, formObject, intInput, optionalText, requiredText } from "@/lib/validation";
 
@@ -90,101 +90,148 @@ export async function runPromotionAction(_prev: unknown, formData: FormData): Pr
     // Tuition re-applies only when the new semester belongs to a later year.
     const crossesYear = toSemester.yearNumber > fromSemester.yearNumber;
 
-    await prisma.$transaction(async (tx) => {
-      const run = await tx.promotionRun.create({
-        data: {
-          batchId,
-          fromSemesterId,
-          toSemesterId: toSemester.id,
-          runById: actor.id,
-          includedCount: included.length,
-          excludedCount: excluded.size,
-          notes,
-        },
-      });
+    /*
+     * The cohort is promoted in a fixed number of statements rather than a
+     * handful per student. Billing them one at a time meant a rate lookup, an
+     * upsert, a count, a plan write and a status update each — seven round trips
+     * a head, so a batch of any size spent the transaction's budget before it
+     * finished and the whole promotion rolled back.
+     */
+    const [feeHistory, alreadyAssigned] = await Promise.all([
+      prisma.batchFeeHistory.findMany({ where: { batchId }, orderBy: { effectiveFrom: "asc" } }),
+      prisma.feeAssignment.findMany({
+        where: { semesterId: toSemester.id, studentId: { in: included.map((s) => s.id) } },
+        select: { studentId: true },
+      }),
+    ]);
 
-      for (const student of candidates) {
-        const isIncluded = !excluded.has(student.id);
-        await tx.promotionRunStudent.create({
+    /** `tuitionRateAt` in memory — the batch's history is the same for everyone. */
+    const rateAt = (asOf: Date): number => {
+      const applicable = feeHistory.filter((row) => row.effectiveFrom <= asOf).at(-1);
+      // Enrolled before the first revision was recorded — fall back to the
+      // earliest known rate rather than charging nothing.
+      return (applicable ?? feeHistory[0])?.tuitionFeePaise ?? 0;
+    };
+    const assignedAlready = new Set(alreadyAssigned.map((row) => row.studentId));
+
+    await prisma.$transaction(
+      async (tx) => {
+        const run = await tx.promotionRun.create({
           data: {
-            promotionRunId: run.id,
-            studentId: student.id,
-            included: isIncluded,
-            exclusionReason: isIncluded ? null : (exclusionReasons.get(student.id) ?? "No reason given"),
-            backlogFlagged: backlogged.has(student.id),
+            batchId,
+            fromSemesterId,
+            toSemesterId: toSemester.id,
+            runById: actor.id,
+            includedCount: included.length,
+            excludedCount: excluded.size,
+            notes,
           },
         });
 
-        if (!isIncluded) continue;
+        await tx.promotionRunStudent.createMany({
+          data: candidates.map((student) => {
+            const isIncluded = !excluded.has(student.id);
+            return {
+              promotionRunId: run.id,
+              studentId: student.id,
+              included: isIncluded,
+              exclusionReason: isIncluded ? null : (exclusionReasons.get(student.id) ?? "No reason given"),
+              backlogFlagged: backlogged.has(student.id),
+            };
+          }),
+        });
 
         // Year 2+ pays Year 1's original fee — the locked rate, no scholarship.
-        const lockedRate = crossesYear ? await tuitionRateAt(batchId, student.enrollmentDate, tx) : 0;
-        const tuitionComponent = crossesYear ? lockedRate - percentOf(lockedRate, 0) : 0;
-        const total = tuitionComponent + toSemester.examFeePaise + toSemester.activityFeePaise;
-
-        const assignment = await tx.feeAssignment.upsert({
-          where: { studentId_semesterId: { studentId: student.id, semesterId: toSemester.id } },
-          update: {},
-          create: {
-            studentId: student.id,
-            semesterId: toSemester.id,
-            academicYearId: toSemester.academicYearId,
-            yearNumber: toSemester.yearNumber,
-            lockedTuitionRatePaise: lockedRate,
-            tuitionComponentPaise: tuitionComponent,
-            scholarshipPercent: 0,
-            scholarshipAmountPaise: 0,
-            examFeePaise: toSemester.examFeePaise,
-            activityFeePaise: toSemester.activityFeePaise,
-            totalPayablePaise: total,
-            createdById: actor.id,
-          },
+        const billing = included.map((student) => {
+          const lockedRate = crossesYear ? rateAt(student.enrollmentDate) : 0;
+          const tuitionComponent = crossesYear ? lockedRate - percentOf(lockedRate, 0) : 0;
+          return {
+            student,
+            lockedRate,
+            tuitionComponent,
+            total: tuitionComponent + toSemester.examFeePaise + toSemester.activityFeePaise,
+          };
         });
 
-        const existing = await tx.installment.count({ where: { feeAssignmentId: assignment.id } });
-        if (existing === 0 && total > 0) {
-          const plan = buildInstallmentPlan({
-            totalPayablePaise: total,
+        // A student already assigned this semester keeps what they have — a
+        // re-run must never bill the same semester twice.
+        const fresh = billing.filter((entry) => !assignedAlready.has(entry.student.id));
+        const created =
+          fresh.length === 0
+            ? []
+            : await tx.feeAssignment.createManyAndReturn({
+                select: { id: true, studentId: true },
+                data: fresh.map((entry) => ({
+                  studentId: entry.student.id,
+                  semesterId: toSemester.id,
+                  academicYearId: toSemester.academicYearId,
+                  yearNumber: toSemester.yearNumber,
+                  lockedTuitionRatePaise: entry.lockedRate,
+                  tuitionComponentPaise: entry.tuitionComponent,
+                  scholarshipPercent: 0,
+                  scholarshipAmountPaise: 0,
+                  examFeePaise: toSemester.examFeePaise,
+                  activityFeePaise: toSemester.activityFeePaise,
+                  totalPayablePaise: entry.total,
+                  createdById: actor.id,
+                })),
+              });
+        const assignmentByStudent = new Map(created.map((row) => [row.studentId, row.id]));
+
+        const installments = fresh.flatMap((entry) => {
+          const feeAssignmentId = assignmentByStudent.get(entry.student.id);
+          if (!feeAssignmentId || entry.total <= 0) return [];
+          return buildInstallmentPlan({
+            totalPayablePaise: entry.total,
             count: installmentCount,
             firstDueDate,
             completionDate: batch.completionDate,
+          }).map((item) => ({ ...item, feeAssignmentId }));
+        });
+        if (installments.length > 0) await tx.installment.createMany({ data: installments });
+
+        // Everyone included moves; only the flagged ones pick up the backlog.
+        const flagged = included.filter((student) => backlogged.has(student.id)).map((s) => s.id);
+        const plain = included.filter((student) => !backlogged.has(student.id)).map((s) => s.id);
+        if (plain.length > 0) {
+          await tx.student.updateMany({
+            where: { id: { in: plain } },
+            data: { currentSemesterId: toSemester.id },
           });
-          await tx.installment.createMany({
-            data: plan.map((item) => ({ ...item, feeAssignmentId: assignment.id })),
+        }
+        if (flagged.length > 0) {
+          await tx.student.updateMany({
+            where: { id: { in: flagged } },
+            data: { currentSemesterId: toSemester.id, hasBacklog: true },
           });
         }
 
-        await tx.student.update({
-          where: { id: student.id },
-          data: {
-            currentSemesterId: toSemester.id,
-            ...(backlogged.has(student.id) ? { hasBacklog: true } : {}),
+        await recordAuditTx(tx, {
+          userId: actor.id,
+          action: "promotion.run",
+          entityType: "Batch",
+          entityId: batchId,
+          summary:
+            `Batch ${batch.code} promoted from semester ${fromSemester.semesterNumber} to ${toSemester.semesterNumber} — ` +
+            `${included.length} included, ${excluded.size} excluded`,
+          reason: notes ?? null,
+          metadata: {
+            promotionRunId: run.id,
+            crossesYear,
+            included: included.map((s) => s.studentCode),
+            excluded: [...excluded].map((id) => ({
+              studentCode: candidates.find((s) => s.id === id)?.studentCode,
+              reason: exclusionReasons.get(id) ?? "No reason given",
+            })),
+            backlogFlagged: [...backlogged].map((id) => candidates.find((s) => s.id === id)?.studentCode),
+            installmentCount,
           },
         });
-      }
-
-      await recordAuditTx(tx, {
-        userId: actor.id,
-        action: "promotion.run",
-        entityType: "Batch",
-        entityId: batchId,
-        summary:
-          `Batch ${batch.code} promoted from semester ${fromSemester.semesterNumber} to ${toSemester.semesterNumber} — ` +
-          `${included.length} included, ${excluded.size} excluded`,
-        reason: notes ?? null,
-        metadata: {
-          promotionRunId: run.id,
-          crossesYear,
-          included: included.map((s) => s.studentCode),
-          excluded: [...excluded].map((id) => ({
-            studentCode: candidates.find((s) => s.id === id)?.studentCode,
-            reason: exclusionReasons.get(id) ?? "No reason given",
-          })),
-          backlogFlagged: [...backlogged].map((id) => candidates.find((s) => s.id === id)?.studentCode),
-          installmentCount,
-        },
-      });
-    });
+      },
+      // Every statement is a round trip to a hosted database, and a cohort is
+      // promoted as one unit — give it more room than the default assumes.
+      { timeout: 60_000 },
+    );
 
     revalidatePath("/promotion");
     revalidatePath("/students");
