@@ -93,7 +93,15 @@ those files vanish. If documents upload fine but 404 a day later, this is why.
 Trigger the first deploy (**Deployments → Redeploy**, or push a commit).
 
 Then, from your machine, point the migration and seed at Neon. `prisma.config.ts`
-reads `DIRECT_URL` in preference to `DATABASE_URL`, so set that one:
+reads `DIRECT_URL` in preference to `DATABASE_URL`, so set that one.
+
+**Get the direct string from Neon, not from Vercel.** If the connection strings
+were stored as *Sensitive* environment variables — which is what Vercel's Neon
+integration does — they are write-only: the dashboard will not reveal them,
+`vercel env pull` will not return them, and neither will the REST API. The
+values are readable only by the build and the running functions. Copy the
+string from the Neon dashboard instead (Connection Details, with **connection
+pooling switched off**), which is the same string and always available.
 
 ```bash
 DIRECT_URL="<neon-direct-string>" npm run db:deploy
@@ -152,7 +160,20 @@ would have sent and nothing goes out.
 **Schema changes.** Migrations are deliberately not part of the build — a build
 that migrates can leave the database ahead of a rolled-back deployment. After
 changing the schema, run `npm run db:deploy` against the direct connection
-string yourself, then deploy.
+string yourself, **then** deploy. In that order: a push deploys within about a
+minute, and any page reading a table the migration has not yet created answers
+with a server error until it does.
+
+An additive migration — a new table, a new nullable column — is safe to apply
+while the current build is still live, because that build simply ignores what it
+does not know about. So there is no need to co-ordinate a window: migrate first,
+confirm, then push. A migration that drops or renames something is the opposite
+case and needs the deploy to land first.
+
+If a new table does slip out ahead of its migration, applying it fixes the pages
+immediately — no redeploy is needed. Adding a permission to the catalogue is a
+second step: `SYSTEM_ROLE_DEFINITIONS` only reaches the database through the
+seed, so run that too, or the feature stays invisible to every role.
 
 **Costs.** Neon, Vercel and Blob all have free tiers this app fits inside at
 small scale. The two that grow with real use are blob storage (every uploaded

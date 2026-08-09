@@ -44,8 +44,45 @@ import {
   type AssignableSemester,
 } from "./student-actions";
 import { WaiveLateFeeButton } from "@/components/waive-late-fee-button";
+import { Prisma } from "@/generated/prisma/client";
 
 export const metadata = { title: "Student record" };
+
+/**
+ * The student's course-change history — or nothing, when the table is not there.
+ *
+ * Migrations are deliberately not part of the build (see DEPLOYMENT.md), so a
+ * deployment can reach production minutes before its migration does. That gap
+ * has already cost this page once: the history is one card near the bottom, and
+ * it should not be able to take a student's whole record down with it.
+ *
+ * Only "the table does not exist" is swallowed, and it is logged where the
+ * deployment logs will show it. Every other database error still throws.
+ */
+async function loadCourseChanges(studentId: string) {
+  try {
+    return await prisma.courseChange.findMany({
+      where: { studentId },
+      include: {
+        fromCourse: { select: { name: true } },
+        toCourse: { select: { name: true } },
+        fromBatch: { select: { code: true } },
+        toBatch: { select: { code: true } },
+        changedBy: { select: { name: true } },
+      },
+      orderBy: { changedAt: "desc" },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021") {
+      console.error(
+        "[students] The CourseChange table is missing, so the course-change history is hidden. " +
+          "The database is behind the deployment — run `npm run db:deploy` against the direct connection.",
+      );
+      return [];
+    }
+    throw error;
+  }
+}
 
 export default async function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requirePermission(PERMISSIONS.STUDENT_VIEW);
@@ -71,16 +108,6 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       currentSemester: true,
       application: { include: { guardians: true } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { changedAt: "desc" } },
-      courseChanges: {
-        include: {
-          fromCourse: { select: { name: true } },
-          toCourse: { select: { name: true } },
-          fromBatch: { select: { code: true } },
-          toBatch: { select: { code: true } },
-          changedBy: { select: { name: true } },
-        },
-        orderBy: { changedAt: "desc" },
-      },
       // Read at student level rather than through the installments: a course
       // change can leave money the new fee could not absorb sitting on the
       // record with nothing to point at, and it is still the family's.
@@ -99,6 +126,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     },
   });
   if (!student) notFound();
+
+  const courseChanges = await loadCourseChanges(id);
 
   const allInstallments = student.feeAssignments.flatMap((fa) => fa.installments);
   const assigned = student.feeAssignments.reduce((sum, fa) => sum + fa.totalPayablePaise, 0);
@@ -396,7 +425,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
 
         {/* The fee structures these changes scrapped were deleted outright, so
             this is the only place left that says what they were. */}
-        {student.courseChanges.length > 0 ? (
+        {courseChanges.length > 0 ? (
           <Card
             title="Course changes"
             description="Each one scrapped the fee assigned for the old course and re-applied everything collected to the new one."
@@ -414,7 +443,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
                 </tr>
               </thead>
               <tbody>
-                {student.courseChanges.map((change) => (
+                {courseChanges.map((change) => (
                   <Tr key={change.id}>
                     <Td className="whitespace-nowrap text-muted">{formatDate(change.changedAt)}</Td>
                     <Td>
