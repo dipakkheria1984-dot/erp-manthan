@@ -7,9 +7,9 @@ import { assertPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { deleteUpload, storeImage } from "@/lib/storage";
+import { pdfFirstPageToPng } from "@/lib/pdf-raster";
 import { getCommunicationConfig, getInstitute } from "@/lib/config";
 import { emailIsLive } from "@/lib/notification-providers";
-import { isValidUpiId } from "@/lib/upi";
 import { deliverEmail } from "@/lib/notifications";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { PRINT_COLOR_SCHEMES, PRINT_THEMES, normalizeHex } from "@/lib/print-theme";
@@ -165,12 +165,24 @@ export async function uploadPaymentQrAction(_prev: unknown, formData: FormData):
     const user = await assertPermission(PERMISSIONS.INSTITUTE_MANAGE);
     const file = formData.get("paymentQr");
     if (!(file instanceof File) || file.size === 0) {
-      return fail("Choose an image to upload.", { paymentQr: ["No file selected."] });
+      return fail("Choose a file to upload.", { paymentQr: ["No file selected."] });
     }
 
-    // `storeImage` accepts PNG and JPEG only, which is what a bank's QR arrives
-    // as and what a browser can render without help.
-    const stored = await storeImage(file, "institute");
+    // Banks hand these out as PDFs as often as images. A PDF is rasterised to
+    // PNG here so that everything downstream — the preview, the public route,
+    // the applicant's `<img>` — deals with an ordinary image, and so that a
+    // phone is never asked to render a PDF inline.
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const toStore = isPdf
+      ? new File(
+          [new Uint8Array(await pdfFirstPageToPng(Buffer.from(await file.arrayBuffer())))],
+          `${file.name.replace(/\.pdf$/i, "")}.png`,
+          { type: "image/png" },
+        )
+      : file;
+
+    // `storeImage` accepts PNG and JPEG only, which is what is left by this point.
+    const stored = await storeImage(toStore, "institute");
     const previous = await prisma.instituteConfig.findUnique({ where: { id: 1 } });
 
     await prisma.instituteConfig.update({
@@ -314,14 +326,11 @@ const configSchema = z
       (value) => !value || /^https:\/\//i.test(value),
       "Use the full https:// address of the bank's payment page.",
     ),
-    // Checked rather than trusted: a typo here sends every applicant's money to
-    // an address that either bounces or belongs to somebody else.
-    registrationUpiId: optionalText.refine(
-      (value) => !value || isValidUpiId(value),
-      "A UPI ID looks like name@bank — check it against your own UPI app.",
-    ),
-    registrationUpiPayeeName: optionalText,
+    // `registrationUpiId` and `registrationUpiPayeeName` are deliberately absent.
+    // UPI is parked, and a field the form no longer posts would parse as "" and
+    // overwrite whatever is stored on every save.
     registrationPaymentNote: optionalText,
+    paymentQrEnabled: checkboxInput,
     receiptPrefix: requiredText("Receipt prefix").max(10, "Prefix is too long."),
     receiptPadding: intInput("Receipt number length", { min: 1, max: 12 }),
     applicationPrefix: requiredText("Application ID prefix").max(10, "Prefix is too long."),

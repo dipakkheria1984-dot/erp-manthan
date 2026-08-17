@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { getConfig, getInstitute } from "@/lib/config";
-import { isValidUpiId, upiPaymentUri, upiQrSvg } from "@/lib/upi";
+import { getConfig } from "@/lib/config";
 import { applicationForToken } from "@/lib/applicant-portal";
 import { registrationFeeForCourse } from "@/lib/fees";
 import { formatPaise, paiseToRupees } from "@/lib/money";
@@ -19,9 +18,11 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
 
   // Neither a link nor a UPI ID means the institute is not taking money online
   // at all, so the step says so rather than showing a dead button.
-  const upiConfigured = config.registrationUpiId && isValidUpiId(config.registrationUpiId);
-  const hasUploadedQr = Boolean(config.paymentQrStoragePath);
-  if (!config.registrationPaymentUrl && !upiConfigured && !hasUploadedQr) {
+  // Paying by UPI deep link did not work in practice and is parked — see the
+  // note on `registrationUpiId`. Applicants are offered the hosted page, and
+  // the QR once the institute switches it on.
+  const showQr = Boolean(config.paymentQrStoragePath) && config.paymentQrEnabled;
+  if (!config.registrationPaymentUrl && !showQr) {
     return (
       <div className="space-y-6">
         <Alert tone="info" title="Nothing to pay here">
@@ -42,30 +43,10 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
   // Built here rather than in the client component: the QR is rendered server
   // side so no library ships to the applicant's browser, and an inline SVG
   // means the code is not fetched from anywhere.
-  // The institute's own QR wins outright. One drawn from the VPA is a guess at
-  // what the bank issued, and a code that will not scan is worse than none.
-  const qrImageUrl = hasUploadedQr
-    ? `/api/payment-qr?v=${config.paymentQrUpdatedAt?.getTime() ?? 0}`
-    : null;
-
-  let upi: { id: string; uri: string; qrSvg: string | null } | null = null;
-  if (upiConfigured && config.registrationUpiId) {
-    const institute = await getInstitute().catch(() => null);
-    const uri = upiPaymentUri({
-      upiId: config.registrationUpiId,
-      payeeName: config.registrationUpiPayeeName || institute?.name || "Admissions",
-      amountPaise: quote.amountPaise,
-      // Helps the office match a line on the statement to a person, for the
-      // apps that pass the note through.
-      note: `Admission ${application.fullName}`,
-    });
-    upi = {
-      id: config.registrationUpiId,
-      uri,
-      // Only drawn when the institute has not supplied its own.
-      qrSvg: qrImageUrl ? null : await upiQrSvg(uri),
-    };
-  }
+  // Only ever the institute's own uploaded image. Nothing is generated: a code
+  // drawn from a VPA is a guess at what the bank issued, and one that will not
+  // scan is worse than none.
+  const qrImageUrl = showQr ? `/api/payment-qr?v=${config.paymentQrUpdatedAt?.getTime() ?? 0}` : null;
 
   const claimed =
     application.claimedPaymentReference && application.claimedPaymentPaise !== null
@@ -105,7 +86,6 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
       <PaymentPanel
         token={token}
         paymentUrl={config.registrationPaymentUrl}
-        upi={upi}
         qrImageUrl={qrImageUrl}
         note={config.registrationPaymentNote}
         amountLabel={formatPaise(quote.amountPaise)}

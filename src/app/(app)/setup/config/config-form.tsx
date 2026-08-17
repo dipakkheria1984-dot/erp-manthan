@@ -222,45 +222,20 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
             <div className="mt-6 border-t border-border pt-4">
               <p className="text-sm font-medium">How applicants pay the registration fee</p>
               <p className="mt-1 text-sm text-muted">
-                Offer a UPI ID, a hosted payment page, or both. Applicants are asked to type back the reference
-                they are given either way. Leave both blank to collect at the counter only.
+                Applicants are sent to your bank&rsquo;s hosted page and asked to type back the reference it
+                gives them. Leave it blank to collect at the counter only. A QR can be added below.
               </p>
               <div className="mt-3">
-                <Alert tone="warning" title="Neither method confirms itself">
-                  Money pushed to a UPI ID, or paid on the bank&rsquo;s own page, arrives in your account and
-                  tells this system nothing at all. A reported payment is therefore the applicant&rsquo;s word:
+                <Alert tone="warning" title="Payment does not confirm itself">
+                  Money paid on the bank&rsquo;s page, or scanned from a QR, arrives in your account and tells
+                  this system nothing at all. A reported payment is therefore the applicant&rsquo;s word:
                   no receipt is issued, no money is recorded, and the admission stays provisional until your
                   office checks the reference against the statement and records the collection on the
                   application&rsquo;s Registration fee tab.
                 </Alert>
               </div>
               <div className="mt-4">
-                <FormGrid cols={2}>
-                  <Field
-                    label="UPI ID"
-                    htmlFor="registrationUpiId"
-                    hint="e.g. institute@icici — copy it exactly from your UPI app."
-                    error={fieldError(state, "registrationUpiId")}
-                  >
-                    <Input
-                      id="registrationUpiId"
-                      name="registrationUpiId"
-                      placeholder="name@bank"
-                      defaultValue={config.registrationUpiId ?? ""}
-                    />
-                  </Field>
-                  <Field
-                    label="Payee name shown in UPI apps"
-                    htmlFor="registrationUpiPayeeName"
-                    hint="Optional — the institute's name is used when blank."
-                    error={fieldError(state, "registrationUpiPayeeName")}
-                  >
-                    <Input
-                      id="registrationUpiPayeeName"
-                      name="registrationUpiPayeeName"
-                      defaultValue={config.registrationUpiPayeeName ?? ""}
-                    />
-                  </Field>
+                <FormGrid cols={1}>
                   <Field
                     label="Payment page address"
                     htmlFor="registrationPaymentUrl"
@@ -275,6 +250,16 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
                       defaultValue={config.registrationPaymentUrl ?? ""}
                     />
                   </Field>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="paymentQrEnabled"
+                      name="paymentQrEnabled"
+                      defaultChecked={config.paymentQrEnabled}
+                    />
+                    <label htmlFor="paymentQrEnabled" className="text-sm">
+                      Show the QR to applicants (upload it below first)
+                    </label>
+                  </div>
                   <Field
                     label="Instructions shown to the applicant"
                     htmlFor="registrationPaymentNote"

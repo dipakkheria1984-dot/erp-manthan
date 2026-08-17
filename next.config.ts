@@ -10,7 +10,10 @@ const nextConfig: NextConfig = {
   // pdfkit and exceljs load data files (font metrics, templates) from paths
   // relative to their own package directory. Bundling them rewrites those paths
   // and the lookups fail at runtime, so they stay external on the server.
-  serverExternalPackages: ["pdfkit", "exceljs"],
+  // @napi-rs/canvas ships a native binary and pdfjs-dist expects to be
+  // required at runtime, not bundled; both are used to rasterise an uploaded
+  // payment QR PDF.
+  serverExternalPackages: ["pdfkit", "exceljs", "@napi-rs/canvas", "pdfjs-dist"],
 
   // src/lib/pdf.ts reads the embedded faces from `assets/fonts/` with a path
   // built at runtime, which output file tracing cannot follow. Without this the

@@ -242,14 +242,14 @@ model InstituteConfig {
   /// and is treated as one — see `Application.claimedPayment*`.
   registrationPaymentUrl String?
 
-  /// UPI ID (VPA) the registration fee can be paid to, e.g. `institute@icici`.
+  /// UPI ID (VPA) and payee name. **Parked, not in use.**
   ///
-  /// Carries the same caveat as the link, and for the same reason: a push
-  /// payment to a static VPA tells this system nothing. It buys convenience —
-  /// a deep link on a phone, a QR on a desktop — not confirmation.
+  /// Paying by VPA deep link did not work in practice, so neither field is
+  /// offered in Setup and neither is shown to applicants. The columns and
+  /// `src/lib/upi.ts` are kept because the groundwork is sound and the approach
+  /// may be revisited; the configuration form deliberately does not write to
+  /// them, so any value already stored survives untouched.
   registrationUpiId        String?
-  /// The name UPI apps show the payer as the payee. Falls back to the
-  /// institute's own name when blank.
   registrationUpiPayeeName String?
 
   /// The institute's own payment QR, uploaded as an image.
@@ -265,6 +265,12 @@ model InstituteConfig {
   paymentQrSizeBytes   Int?
   /// Bumped on replacement, and used to bust the browser's image cache.
   paymentQrUpdatedAt   DateTime?
+  /// Whether applicants actually see the uploaded QR.
+  ///
+  /// Separate from having uploaded one so a code can be put in place and
+  /// scan-tested without appearing on the public form the moment it lands.
+  /// Off until the institute says otherwise.
+  paymentQrEnabled     Boolean   @default(false)
 
   /// Shown beside whichever methods are offered — which reference to quote and
   /// so on. Blank for all three hides the payment step entirely.

@@ -26,6 +26,7 @@ export default async function ConfigPage() {
             hasQr={Boolean(config.paymentQrStoragePath)}
             fileName={config.paymentQrFileName}
             version={config.paymentQrUpdatedAt?.getTime() ?? 0}
+            shown={config.paymentQrEnabled}
           />
         </Card>
       </div>

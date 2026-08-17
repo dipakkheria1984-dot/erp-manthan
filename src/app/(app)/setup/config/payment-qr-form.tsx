@@ -15,10 +15,13 @@ export function PaymentQrForm({
   hasQr,
   fileName,
   version,
+  shown,
 }: {
   hasQr: boolean;
   fileName: string | null;
   version: number;
+  /** Whether applicants currently see it — the switch lives on the settings form. */
+  shown: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -36,8 +39,18 @@ export function PaymentQrForm({
               {fileName ? <span className="block text-xs text-muted">{fileName}</span> : null}
             </p>
             <p className="text-xs text-muted">
-              Scan it yourself with a UPI app before relying on it — the code is shown to applicants exactly as
-              uploaded and this system cannot tell whether it resolves.
+              Scan it yourself with a UPI app before switching it on — the code is shown to applicants exactly
+              as uploaded and this system cannot tell whether it resolves.
+            </p>
+            <p className="text-xs">
+              {shown ? (
+                <span className="text-success">Applicants can see this code.</span>
+              ) : (
+                <span className="text-muted">
+                  Not shown to applicants yet — tick &ldquo;Show the QR to applicants&rdquo; in the settings above
+                  and save.
+                </span>
+              )}
             </p>
             <ActionForm action={removePaymentQrAction} className="contents">
               <SubmitButton variant="ghost" size="sm" className="text-danger" pendingLabel="Removing…">
@@ -48,8 +61,9 @@ export function PaymentQrForm({
         </div>
       ) : (
         <Alert tone="info">
-          No QR uploaded. Upload the one your bank gave you — a code issued by the bank is the one it will
-          honour, and it is more reliable than anything generated from a UPI ID alone.
+          No QR uploaded. Upload the one your bank gave you — a code the bank issued is the one it will honour.
+          Uploading does not publish it: applicants see it only once you switch it on above, so you can scan-test
+          it first.
         </Alert>
       )}
 
@@ -59,10 +73,10 @@ export function PaymentQrForm({
             <Field
               label={hasQr ? "Replace the QR image" : "Upload your payment QR"}
               htmlFor="paymentQr"
-              hint="PNG or JPG. Crop it to the code itself — the tighter the crop, the easier it scans."
+              hint="PNG, JPG or PDF. A PDF is converted to an image and trimmed to the code automatically."
               error={fieldError(state, "paymentQr")}
             >
-              <Input id="paymentQr" name="paymentQr" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
+              <Input id="paymentQr" name="paymentQr" type="file" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" />
             </Field>
             <SubmitButton variant="secondary" pendingLabel="Uploading…">
               {hasQr ? "Replace QR" : "Upload QR"}

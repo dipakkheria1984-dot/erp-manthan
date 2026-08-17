@@ -11,11 +11,14 @@ import { savePortalPaymentClaimAction } from "../../actions";
  * The two halves are deliberately separate. Opening the link proves nothing —
  * the bank tells this system nothing at all — so the reference is typed back in
  * by hand and travels onward marked as unverified.
+ *
+ * Paying by UPI deep link is parked: it did not work in practice, so applicants
+ * see the hosted page and, once the institute switches it on, the QR its bank
+ * issued.
  */
 export function PaymentPanel({
   token,
   paymentUrl,
-  upi,
   qrImageUrl,
   note,
   amountLabel,
@@ -23,8 +26,7 @@ export function PaymentPanel({
 }: {
   token: string;
   paymentUrl: string | null;
-  upi: { id: string; uri: string; qrSvg: string | null } | null;
-  /** The institute's own uploaded QR. Preferred over anything generated. */
+  /** The institute's own uploaded QR, once switched on. Never generated. */
   qrImageUrl: string | null;
   note: string | null;
   amountLabel: string;
@@ -32,56 +34,31 @@ export function PaymentPanel({
 }) {
   return (
     <div className="space-y-6">
-      {upi || qrImageUrl ? (
+      {qrImageUrl ? (
         <Card
           title="Pay by UPI"
-          description={`${amountLabel} · scan the code with any UPI app, or tap the button if you are already on your phone.`}
+          description={`${amountLabel} · scan this code with any UPI app on your phone.`}
         >
           {note ? <p className="mb-4 text-sm text-muted">{note}</p> : null}
-          <div className="flex flex-wrap items-center gap-6">
-            {qrImageUrl ? (
-              // The institute's own code, served from this app rather than
-              // generated, because the bank's is the one the bank honours.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={qrImageUrl}
-                alt="Scan this QR code with your UPI app to pay the registration fee"
-                className="h-56 w-56 shrink-0 rounded-md border border-border bg-white object-contain p-2"
-              />
-            ) : upi?.qrSvg ? (
-              <div
-                className="h-56 w-56 shrink-0 rounded-md border border-border bg-white p-2 [&>svg]:h-full [&>svg]:w-full"
-                dangerouslySetInnerHTML={{ __html: upi.qrSvg }}
-              />
-            ) : null}
-            <div className="space-y-3">
-              {upi ? (
-                <div>
-                  <p className="text-xs text-muted">UPI ID</p>
-                  <p className="font-mono text-sm font-medium">{upi.id}</p>
-                </div>
-              ) : null}
-              {upi ? <LinkButton href={upi.uri}>Open my UPI app</LinkButton> : null}
-              <p className="max-w-xs text-xs text-muted">
-                {upi
-                  ? "The button works on a phone with a UPI app installed. On a computer, scan the code with your phone instead."
-                  : "Scan the code with your phone's UPI app."}
-              </p>
-            </div>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={qrImageUrl}
+            alt="Scan this QR code with your UPI app to pay the registration fee"
+            className="h-56 w-56 rounded-md border border-border bg-white object-contain p-2"
+          />
           <p className="mt-4 text-xs text-muted">
-            Check the payee name and the amount in your UPI app before approving. Keep the UPI transaction ID or
-            UTR it gives you — you will need it below.
+            Check the payee name and the amount in your UPI app before approving. Keep the transaction ID or UTR
+            it gives you — you will need it below.
           </p>
         </Card>
       ) : null}
 
       {paymentUrl ? (
         <Card
-          title={upi || qrImageUrl ? "Or pay by card or netbanking" : "Pay the registration fee"}
+          title={qrImageUrl ? "Or pay by card or netbanking" : "Pay the registration fee"}
           description={`${amountLabel} · you will be taken to the bank's secure page, which opens in a new tab.`}
         >
-          {note && !upi && !qrImageUrl ? <p className="mb-4 text-sm text-muted">{note}</p> : null}
+          {note && !qrImageUrl ? <p className="mb-4 text-sm text-muted">{note}</p> : null}
           <LinkButton href={paymentUrl} target="_blank" rel="noreferrer noopener">
             Open the payment page
           </LinkButton>
