@@ -149,6 +149,9 @@ model Institute {
   pincode        String?
   contactEmail   String?
   contactPhone   String?
+  /// No longer collected in Setup or printed on any document — the institute
+  /// has neither number. Kept so the existing values are not destroyed; drop
+  /// the columns in a migration if they are ever confirmed unwanted.
   registrationNo String?
   affiliationNo  String?
   website        String?

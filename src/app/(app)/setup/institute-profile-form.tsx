@@ -38,12 +38,6 @@ export function InstituteProfileForm({ institute }: { institute: Institute | nul
             <Field label="Website" htmlFor="website" error={fieldError(state, "website")}>
               <Input id="website" name="website" defaultValue={institute?.website ?? ""} />
             </Field>
-            <Field label="Registration no." htmlFor="registrationNo" error={fieldError(state, "registrationNo")}>
-              <Input id="registrationNo" name="registrationNo" defaultValue={institute?.registrationNo ?? ""} />
-            </Field>
-            <Field label="Affiliation no." htmlFor="affiliationNo" error={fieldError(state, "affiliationNo")}>
-              <Input id="affiliationNo" name="affiliationNo" defaultValue={institute?.affiliationNo ?? ""} />
-            </Field>
           </FormGrid>
           <FormActions>
             <SubmitButton pendingLabel="Saving…">Save profile</SubmitButton>

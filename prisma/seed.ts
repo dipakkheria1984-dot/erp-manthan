@@ -87,8 +87,6 @@ async function main() {
       pincode: "380001",
       contactEmail: "office@manthan.edu.in",
       contactPhone: "+91 79 1234 5678",
-      registrationNo: "REG/2019/0042",
-      affiliationNo: "AFF/GTU/2019/117",
     },
   });
 

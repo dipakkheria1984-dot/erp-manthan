@@ -37,8 +37,6 @@ const instituteSchema = z.object({
   pincode: optionalText,
   contactEmail: optionalText,
   contactPhone: optionalText,
-  registrationNo: optionalText,
-  affiliationNo: optionalText,
   website: optionalText,
 });
 

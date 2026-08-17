@@ -312,8 +312,6 @@ export function drawHeader(
   const contact = [
     institute.contactPhone ? `Phone: ${institute.contactPhone}` : null,
     institute.contactEmail ? `Email: ${institute.contactEmail}` : null,
-    institute.registrationNo ? `Reg. No: ${institute.registrationNo}` : null,
-    institute.affiliationNo ? `Affiliation: ${institute.affiliationNo}` : null,
   ].filter(Boolean);
   if (contact.length) {
     const line = contact.join("  ·  ");
