@@ -252,6 +252,20 @@ model InstituteConfig {
   /// institute's own name when blank.
   registrationUpiPayeeName String?
 
+  /// The institute's own payment QR, uploaded as an image.
+  ///
+  /// Preferred over anything generated from the UPI ID. A QR issued by the bank
+  /// is the one the bank will honour — it may be a signed merchant code, carry
+  /// routing this system knows nothing about, or simply be the only variant the
+  /// payer's app accepts. Generating a lookalike from a VPA guesses at all of
+  /// that; an uploaded image does not.
+  paymentQrStoragePath String?
+  paymentQrFileName    String?
+  paymentQrMimeType    String?
+  paymentQrSizeBytes   Int?
+  /// Bumped on replacement, and used to bust the browser's image cache.
+  paymentQrUpdatedAt   DateTime?
+
   /// Shown beside whichever methods are offered — which reference to quote and
   /// so on. Blank for all three hides the payment step entirely.
   registrationPaymentNote  String?

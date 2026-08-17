@@ -20,7 +20,8 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
   // Neither a link nor a UPI ID means the institute is not taking money online
   // at all, so the step says so rather than showing a dead button.
   const upiConfigured = config.registrationUpiId && isValidUpiId(config.registrationUpiId);
-  if (!config.registrationPaymentUrl && !upiConfigured) {
+  const hasUploadedQr = Boolean(config.paymentQrStoragePath);
+  if (!config.registrationPaymentUrl && !upiConfigured && !hasUploadedQr) {
     return (
       <div className="space-y-6">
         <Alert tone="info" title="Nothing to pay here">
@@ -41,7 +42,13 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
   // Built here rather than in the client component: the QR is rendered server
   // side so no library ships to the applicant's browser, and an inline SVG
   // means the code is not fetched from anywhere.
-  let upi: { id: string; uri: string; qrSvg: string } | null = null;
+  // The institute's own QR wins outright. One drawn from the VPA is a guess at
+  // what the bank issued, and a code that will not scan is worse than none.
+  const qrImageUrl = hasUploadedQr
+    ? `/api/payment-qr?v=${config.paymentQrUpdatedAt?.getTime() ?? 0}`
+    : null;
+
+  let upi: { id: string; uri: string; qrSvg: string | null } | null = null;
   if (upiConfigured && config.registrationUpiId) {
     const institute = await getInstitute().catch(() => null);
     const uri = upiPaymentUri({
@@ -52,7 +59,12 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
       // apps that pass the note through.
       note: `Admission ${application.fullName}`,
     });
-    upi = { id: config.registrationUpiId, uri, qrSvg: await upiQrSvg(uri) };
+    upi = {
+      id: config.registrationUpiId,
+      uri,
+      // Only drawn when the institute has not supplied its own.
+      qrSvg: qrImageUrl ? null : await upiQrSvg(uri),
+    };
   }
 
   const claimed =
@@ -94,6 +106,7 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
         token={token}
         paymentUrl={config.registrationPaymentUrl}
         upi={upi}
+        qrImageUrl={qrImageUrl}
         note={config.registrationPaymentNote}
         amountLabel={formatPaise(quote.amountPaise)}
         existing={claimed}

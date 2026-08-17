@@ -149,6 +149,87 @@ export async function removeInstituteLogoAction(
 }
 
 /* -------------------------------------------------------------------------- */
+/* 9.2 Payment QR                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Stores the institute's own payment QR image.
+ *
+ * Uploaded rather than generated on purpose. A code issued by the bank is the
+ * one the bank will honour — it may be signed, carry routing this system has no
+ * knowledge of, or simply be the only variant a given UPI app will accept.
+ * Drawing a lookalike from a VPA guesses at all of that.
+ */
+export async function uploadPaymentQrAction(_prev: unknown, formData: FormData): Promise<ActionResult<undefined>> {
+  return runAction(async () => {
+    const user = await assertPermission(PERMISSIONS.INSTITUTE_MANAGE);
+    const file = formData.get("paymentQr");
+    if (!(file instanceof File) || file.size === 0) {
+      return fail("Choose an image to upload.", { paymentQr: ["No file selected."] });
+    }
+
+    // `storeImage` accepts PNG and JPEG only, which is what a bank's QR arrives
+    // as and what a browser can render without help.
+    const stored = await storeImage(file, "institute");
+    const previous = await prisma.instituteConfig.findUnique({ where: { id: 1 } });
+
+    await prisma.instituteConfig.update({
+      where: { id: 1 },
+      data: {
+        paymentQrStoragePath: stored.storagePath,
+        paymentQrFileName: stored.fileName,
+        paymentQrMimeType: stored.mimeType,
+        paymentQrSizeBytes: stored.sizeBytes,
+        paymentQrUpdatedAt: new Date(),
+      },
+    });
+    // Written first: if removing the old file fails the row is still right, and
+    // the worst outcome is one orphaned image.
+    if (previous?.paymentQrStoragePath) await deleteUpload(previous.paymentQrStoragePath);
+
+    await recordAudit({
+      userId: user.id,
+      action: "institute.payment_qr_uploaded",
+      entityType: "InstituteConfig",
+      entityId: "1",
+      summary: `Payment QR ${previous?.paymentQrStoragePath ? "replaced" : "uploaded"} (${stored.fileName})`,
+    });
+    revalidatePath("/setup/config");
+    return ok(undefined, "Payment QR uploaded. Applicants see it on the registration fee step.");
+  });
+}
+
+export async function removePaymentQrAction(_prev: unknown, _formData: FormData): Promise<ActionResult<undefined>> {
+  return runAction(async () => {
+    const user = await assertPermission(PERMISSIONS.INSTITUTE_MANAGE);
+    const config = await prisma.instituteConfig.findUnique({ where: { id: 1 } });
+    if (!config?.paymentQrStoragePath) return fail("There is no payment QR to remove.");
+
+    await prisma.instituteConfig.update({
+      where: { id: 1 },
+      data: {
+        paymentQrStoragePath: null,
+        paymentQrFileName: null,
+        paymentQrMimeType: null,
+        paymentQrSizeBytes: null,
+        paymentQrUpdatedAt: null,
+      },
+    });
+    await deleteUpload(config.paymentQrStoragePath);
+
+    await recordAudit({
+      userId: user.id,
+      action: "institute.payment_qr_removed",
+      entityType: "InstituteConfig",
+      entityId: "1",
+      summary: "Payment QR removed",
+    });
+    revalidatePath("/setup/config");
+    return ok(undefined, "Payment QR removed.");
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* 9.1 Printed material appearance                                             */
 /* -------------------------------------------------------------------------- */
 
