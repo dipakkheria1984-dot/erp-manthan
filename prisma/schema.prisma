@@ -239,10 +239,21 @@ model InstituteConfig {
   ///
   /// A link, not an integration: the bank's page reports nothing back, so the
   /// applicant returns and types the reference they were given. That is a claim
-  /// and is treated as one — see `Application.claimedPayment*`. Blank hides the
-  /// payment step entirely.
-  registrationPaymentUrl   String?
-  /// Shown beside the link — which account, what reference to quote, and so on.
+  /// and is treated as one — see `Application.claimedPayment*`.
+  registrationPaymentUrl String?
+
+  /// UPI ID (VPA) the registration fee can be paid to, e.g. `institute@icici`.
+  ///
+  /// Carries the same caveat as the link, and for the same reason: a push
+  /// payment to a static VPA tells this system nothing. It buys convenience —
+  /// a deep link on a phone, a QR on a desktop — not confirmation.
+  registrationUpiId        String?
+  /// The name UPI apps show the payer as the payee. Falls back to the
+  /// institute's own name when blank.
+  registrationUpiPayeeName String?
+
+  /// Shown beside whichever methods are offered — which reference to quote and
+  /// so on. Blank for all three hides the payment step entirely.
   registrationPaymentNote  String?
   /// Applications one address may start per hour. The public form is the only
   /// unauthenticated way into the database, so it is metered.

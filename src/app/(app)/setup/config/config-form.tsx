@@ -220,22 +220,47 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
             </FormGrid>
 
             <div className="mt-6 border-t border-border pt-4">
-              <p className="text-sm font-medium">Registration fee payment link</p>
+              <p className="text-sm font-medium">How applicants pay the registration fee</p>
               <p className="mt-1 text-sm text-muted">
-                Paste your bank&rsquo;s hosted payment page. Applicants are sent there and asked to type back the
-                reference the bank gives them.
+                Offer a UPI ID, a hosted payment page, or both. Applicants are asked to type back the reference
+                they are given either way. Leave both blank to collect at the counter only.
               </p>
               <div className="mt-3">
-                <Alert tone="warning" title="This is a link, not a verified integration">
-                  The bank&rsquo;s page reports nothing back to this system, so a reported payment is the
-                  applicant&rsquo;s word: no receipt is issued, no money is recorded, and the admission stays
-                  provisional until your office checks the reference against the bank statement and records the
-                  collection on the application&rsquo;s Registration fee tab. Leave this blank to collect at the
-                  counter only.
+                <Alert tone="warning" title="Neither method confirms itself">
+                  Money pushed to a UPI ID, or paid on the bank&rsquo;s own page, arrives in your account and
+                  tells this system nothing at all. A reported payment is therefore the applicant&rsquo;s word:
+                  no receipt is issued, no money is recorded, and the admission stays provisional until your
+                  office checks the reference against the statement and records the collection on the
+                  application&rsquo;s Registration fee tab.
                 </Alert>
               </div>
               <div className="mt-4">
-                <FormGrid cols={1}>
+                <FormGrid cols={2}>
+                  <Field
+                    label="UPI ID"
+                    htmlFor="registrationUpiId"
+                    hint="e.g. institute@icici — copy it exactly from your UPI app."
+                    error={fieldError(state, "registrationUpiId")}
+                  >
+                    <Input
+                      id="registrationUpiId"
+                      name="registrationUpiId"
+                      placeholder="name@bank"
+                      defaultValue={config.registrationUpiId ?? ""}
+                    />
+                  </Field>
+                  <Field
+                    label="Payee name shown in UPI apps"
+                    htmlFor="registrationUpiPayeeName"
+                    hint="Optional — the institute's name is used when blank."
+                    error={fieldError(state, "registrationUpiPayeeName")}
+                  >
+                    <Input
+                      id="registrationUpiPayeeName"
+                      name="registrationUpiPayeeName"
+                      defaultValue={config.registrationUpiPayeeName ?? ""}
+                    />
+                  </Field>
                   <Field
                     label="Payment page address"
                     htmlFor="registrationPaymentUrl"

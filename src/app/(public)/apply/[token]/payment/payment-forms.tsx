@@ -1,7 +1,7 @@
 "use client";
 
 import { ActionForm, SubmitButton, fieldError } from "@/components/form";
-import { Card, Field, FormActions, FormGrid, Input, LinkButton } from "@/components/ui";
+import { Alert, Card, Field, FormActions, FormGrid, Input, LinkButton } from "@/components/ui";
 import { savePortalPaymentClaimAction } from "../../actions";
 
 /**
@@ -15,36 +15,74 @@ import { savePortalPaymentClaimAction } from "../../actions";
 export function PaymentPanel({
   token,
   paymentUrl,
+  upi,
   note,
   amountLabel,
   existing,
 }: {
   token: string;
-  paymentUrl: string;
+  paymentUrl: string | null;
+  upi: { id: string; uri: string; qrSvg: string } | null;
   note: string | null;
   amountLabel: string;
   existing: { reference: string; amount: string; paidOn: string } | null;
 }) {
   return (
     <div className="space-y-6">
-      <Card
-        title="Pay the registration fee"
-        description={`${amountLabel} · you will be taken to the bank's secure page, which opens in a new tab.`}
-      >
-        {note ? <p className="mb-4 text-sm text-muted">{note}</p> : null}
-        <LinkButton href={paymentUrl} target="_blank" rel="noreferrer noopener">
-          Open the payment page
-        </LinkButton>
-        <p className="mt-3 text-xs text-muted">
-          Keep the reference or transaction number the bank shows you — you will need it below. Never share your
-          card details, UPI PIN or one-time password with anyone from the institute; the bank&rsquo;s page is the
-          only place they should ever be entered.
-        </p>
-      </Card>
+      {upi ? (
+        <Card
+          title="Pay by UPI"
+          description={`${amountLabel} to the institute's UPI ID. Scan the code from your phone, or tap the button if you are already on one.`}
+        >
+          {note ? <p className="mb-4 text-sm text-muted">{note}</p> : null}
+          <div className="flex flex-wrap items-center gap-6">
+            {/* Inline SVG: no external request, so nothing about this payment
+                is fetched from anywhere else. */}
+            <div
+              className="h-44 w-44 shrink-0 rounded-md border border-border bg-white p-2 [&>svg]:h-full [&>svg]:w-full"
+              dangerouslySetInnerHTML={{ __html: upi.qrSvg }}
+            />
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs text-muted">UPI ID</p>
+                <p className="font-mono text-sm font-medium">{upi.id}</p>
+              </div>
+              <LinkButton href={upi.uri}>Open my UPI app</LinkButton>
+              <p className="max-w-xs text-xs text-muted">
+                The button works on a phone with a UPI app installed. On a computer, scan the code instead.
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            Check the payee name and the amount in your UPI app before approving. Keep the UPI transaction ID or
+            UTR it gives you — you will need it below.
+          </p>
+        </Card>
+      ) : null}
+
+      {paymentUrl ? (
+        <Card
+          title={upi ? "Or pay by card or netbanking" : "Pay the registration fee"}
+          description={`${amountLabel} · you will be taken to the bank's secure page, which opens in a new tab.`}
+        >
+          {note && !upi ? <p className="mb-4 text-sm text-muted">{note}</p> : null}
+          <LinkButton href={paymentUrl} target="_blank" rel="noreferrer noopener">
+            Open the payment page
+          </LinkButton>
+          <p className="mt-3 text-xs text-muted">
+            Keep the reference or transaction number the bank shows you — you will need it below.
+          </p>
+        </Card>
+      ) : null}
+
+      <Alert tone="warning" title="Nobody from the institute will ever ask for your PIN">
+        Your UPI PIN, card CVV and one-time passwords are entered only in your own bank or UPI app. No member of
+        staff will ask you for them, by phone or otherwise, and this form never asks for them.
+      </Alert>
 
       <Card
         title="Tell us what you paid"
-        description="Enter the reference the bank gave you. The office checks it against the bank statement before confirming."
+        description="Enter the UPI transaction ID, UTR or bank reference. The office checks it against the statement before confirming."
       >
         <ActionForm action={savePortalPaymentClaimAction}>
           {(state) => (
@@ -52,7 +90,7 @@ export function PaymentPanel({
               <input type="hidden" name="token" value={token} />
               <FormGrid>
                 <Field
-                  label="Payment reference / transaction number"
+                  label="UPI transaction ID / UTR / bank reference"
                   htmlFor="reference"
                   required
                   error={fieldError(state, "reference")}

@@ -9,6 +9,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { deleteUpload, storeImage } from "@/lib/storage";
 import { getCommunicationConfig, getInstitute } from "@/lib/config";
 import { emailIsLive } from "@/lib/notification-providers";
+import { isValidUpiId } from "@/lib/upi";
 import { deliverEmail } from "@/lib/notifications";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { PRINT_COLOR_SCHEMES, PRINT_THEMES, normalizeHex } from "@/lib/print-theme";
@@ -232,6 +233,13 @@ const configSchema = z
       (value) => !value || /^https:\/\//i.test(value),
       "Use the full https:// address of the bank's payment page.",
     ),
+    // Checked rather than trusted: a typo here sends every applicant's money to
+    // an address that either bounces or belongs to somebody else.
+    registrationUpiId: optionalText.refine(
+      (value) => !value || isValidUpiId(value),
+      "A UPI ID looks like name@bank — check it against your own UPI app.",
+    ),
+    registrationUpiPayeeName: optionalText,
     registrationPaymentNote: optionalText,
     receiptPrefix: requiredText("Receipt prefix").max(10, "Prefix is too long."),
     receiptPadding: intInput("Receipt number length", { min: 1, max: 12 }),
