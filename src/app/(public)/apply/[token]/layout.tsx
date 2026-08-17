@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { applicationForToken, type PortalRejection } from "@/lib/applicant-portal";
+import { getConfig } from "@/lib/config";
+import { paymentIsOffered } from "@/lib/applicant-payment";
 import { Alert } from "@/components/ui";
 import { ApplyNav } from "./apply-nav";
 
@@ -65,7 +67,7 @@ export default async function TokenLayout({
           Your answers save as you go. You can close this page and come back with the same link.
         </p>
       </div>
-      <ApplyNav token={token} />
+      <ApplyNav token={token} paymentOffered={paymentIsOffered(await getConfig())} />
       {children}
     </div>
   );

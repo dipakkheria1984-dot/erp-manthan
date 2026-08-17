@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { applicationForToken } from "@/lib/applicant-portal";
+import { getConfig } from "@/lib/config";
+import { paymentIsOffered } from "@/lib/applicant-payment";
 import { Alert, Badge, Card, EmptyState, LinkButton, TableWrap, Td, Th, Tr } from "@/components/ui";
 import { PortalDocumentUpload } from "./upload-form";
 
@@ -9,6 +11,7 @@ export default async function PortalDocumentsPage({ params }: { params: Promise<
   const result = await applicationForToken(token);
   if (!result.ok) notFound();
 
+  const offersPayment = paymentIsOffered(await getConfig());
   const [requirements, documents] = await Promise.all([
     prisma.documentRequirement.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
     prisma.applicationDocument.findMany({ where: { applicationId: result.application.id } }),
@@ -72,7 +75,11 @@ export default async function PortalDocumentsPage({ params }: { params: Promise<
       </Card>
 
       <div className="flex justify-end">
-        <LinkButton href={`/apply/${token}/payment`}>Continue to registration fee</LinkButton>
+        {offersPayment ? (
+          <LinkButton href={`/apply/${token}/payment`}>Continue to registration fee</LinkButton>
+        ) : (
+          <LinkButton href={`/apply/${token}/finish`}>Continue to finish</LinkButton>
+        )}
       </div>
     </div>
   );

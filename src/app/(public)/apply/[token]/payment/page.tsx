@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { applicationForToken } from "@/lib/applicant-portal";
+import { paymentIsOffered } from "@/lib/applicant-payment";
 import { registrationFeeForCourse } from "@/lib/fees";
 import { formatPaise, paiseToRupees } from "@/lib/money";
 import { toDateInput } from "@/lib/dates";
@@ -22,7 +23,7 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
   // note on `registrationUpiId`. Applicants are offered the hosted page, and
   // the QR once the institute switches it on.
   const showQr = Boolean(config.paymentQrStoragePath) && config.paymentQrEnabled;
-  if (!config.registrationPaymentUrl && !showQr) {
+  if (!paymentIsOffered(config)) {
     return (
       <div className="space-y-6">
         <Alert tone="info" title="Nothing to pay here">

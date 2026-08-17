@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
+import { paymentIsOffered } from "@/lib/applicant-payment";
 import { Alert, Card } from "@/components/ui";
 import { StartForm } from "./start-form";
 
@@ -41,6 +42,11 @@ export default async function ApplyPage() {
     select: { label: true, isRequired: true },
   });
 
+  // Whether the applicant will actually meet a payment step. Said here so the
+  // page describes the form they are about to fill in rather than a form the
+  // institute has not switched on.
+  const paymentOffered = paymentIsOffered(config);
+
   return (
     <div className="space-y-6">
       <Card title="Before you begin">
@@ -49,6 +55,7 @@ export default async function ApplyPage() {
           <li>Your parent or guardian&rsquo;s details</li>
           <li>The department and course you want to apply for</li>
           <li>Scanned copies of your documents, if you have them (PDF, JPG or PNG)</li>
+          {paymentOffered ? <li>The registration fee, if you want to pay it now</li> : null}
         </ol>
         {requirements.length > 0 ? (
           <div className="mt-4">
@@ -68,8 +75,19 @@ export default async function ApplyPage() {
           admissions office once your admission is confirmed.
         </p>
         <p className="mt-2 text-sm text-muted">
-          You do not pay anything here. Once your form is in, the admissions office will check it and contact
-          you about the course fees and how to pay them.
+          {paymentOffered ? (
+            <>
+              The last step offers you the registration fee to pay online. Paying is optional — you can send your
+              form in without it and settle at the admissions office instead. Whichever you choose, the office
+              confirms your admission and sets out the rest of the course fees once they have placed you in a
+              batch.
+            </>
+          ) : (
+            <>
+              You do not pay anything here. Once your form is in, the admissions office will check it and contact
+              you about the fees and how to pay them.
+            </>
+          )}
         </p>
       </Card>
 
