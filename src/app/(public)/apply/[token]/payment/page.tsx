@@ -36,13 +36,12 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
     );
   }
 
+  // The fee is set on the course the applicant chose, so this is their actual
+  // amount rather than a guess at which batch they will land in.
   const quote = application.courseId
     ? await registrationFeeForCourse(application.courseId, config)
-    : { amountPaise: config.minRegistrationFeePaise, batchName: null };
+    : { amountPaise: config.minRegistrationFeePaise, exact: false };
 
-  // Built here rather than in the client component: the QR is rendered server
-  // side so no library ships to the applicant's browser, and an inline SVG
-  // means the code is not fetched from anywhere.
   // Only ever the institute's own uploaded image. Nothing is generated: a code
   // drawn from a VPA is a guess at what the bank issued, and one that will not
   // scan is worse than none.
@@ -62,11 +61,11 @@ export default async function PortalPaymentPage({ params }: { params: Promise<{ 
       <Card title="What you need to pay">
         <p className="text-2xl font-semibold tabular-nums">{formatPaise(quote.amountPaise)}</p>
         <p className="mt-1 text-sm text-muted">
-          {quote.batchName
-            ? `Indicative, based on the ${quote.batchName} batch of your chosen course. `
-            : "Indicative. "}
-          The admissions office places you in a batch and confirms the exact amount — anything over or under is
-          settled with them, and paying now does not reserve a seat by itself.
+          {quote.exact
+            ? "The registration fee for the course you chose. "
+            : "Indicative — a batch of your course charges a different amount, and the office confirms which applies. "}
+          Paying now does not reserve a seat by itself; the admissions office places you in a batch and confirms
+          your admission.
         </p>
       </Card>
 

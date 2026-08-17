@@ -408,7 +408,9 @@ export async function saveFeePlanAction(_prev: unknown, formData: FormData): Pro
 
     const application = await prisma.application.findUnique({
       where: { id: applicationId },
-      include: { batch: true },
+      // The course rides along: the registration fee is set there and inherited
+      // by the batch unless that batch overrides it.
+      include: { batch: { include: { course: { select: { registrationFeePaise: true } } } } },
     });
     if (!application) return fail("Application not found.");
     if (!isEditable(application.status)) return fail("This application can no longer be edited.");

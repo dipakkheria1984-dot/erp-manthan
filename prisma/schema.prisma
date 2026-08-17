@@ -503,8 +503,20 @@ model Course {
   /// Minimum 2 — single-semester courses are not allowed (spec 5.2).
   totalSemesters Int
   status         CourseStatus @default(ACTIVE)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+
+  /// What a new admission onto this course pays to register.
+  ///
+  /// Set once here and every batch of the course follows it, including batches
+  /// created later — which is why it lives on the course rather than being
+  /// copied outwards. A batch may still carry its own figure to override it,
+  /// but does not need one.
+  ///
+  /// Null falls through to the institute-wide minimum, which is also the floor:
+  /// see `registrationFeeFor`.
+  registrationFeePaise Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   department   Department    @relation(fields: [departmentId], references: [id])
   batches      Batch[]
@@ -530,13 +542,15 @@ model Batch {
   totalSeats     Int
   status         BatchStatus @default(UPCOMING)
 
-  /// What a new admission into this batch pays to register, and therefore what
-  /// installment 1 is — the two are the same amount by definition, and the
-  /// admission stays provisional until it is cleared.
+  /// Overrides the course's registration fee for this batch alone.
   ///
-  /// Null means the batch predates this being settable, and the institute-wide
-  /// minimum stands in. Where a value is set it may not fall below that
-  /// minimum, so the institute figure is a floor rather than a default.
+  /// Normally null: the fee is set on the course and every batch of it follows.
+  /// A value here is for the exception — an evening cohort on different terms,
+  /// say — and never has to be filled in for the ordinary case.
+  ///
+  /// Whatever the source, the amount is what installment 1 is and what the
+  /// admission stays provisional until it clears; and it may not fall below the
+  /// institute-wide minimum, which is a floor rather than a default.
   ///
   /// Admission only: promotion into a later year raises no registration fee.
   registrationFeePaise Int?

@@ -51,7 +51,10 @@ export function blockingItems(readiness: ReadinessItem[]): ReadinessItem[] {
  */
 export async function requiredRegistrationFee(
   application: Pick<ApplicationWithRelations, "batchId"> & {
-    batch?: { registrationFeePaise: number | null } | null;
+    batch?: {
+      registrationFeePaise: number | null;
+      course?: { registrationFeePaise: number | null } | null;
+    } | null;
   },
   db: Db = prisma,
 ): Promise<number> {
@@ -61,7 +64,8 @@ export async function requiredRegistrationFee(
     (application.batchId
       ? await db.batch.findUnique({
           where: { id: application.batchId },
-          select: { registrationFeePaise: true },
+          // The course comes too: the fee is normally set there and inherited.
+          select: { registrationFeePaise: true, course: { select: { registrationFeePaise: true } } },
         })
       : null);
   const required = batch ? registrationFeeFor(batch, config) : config.minRegistrationFeePaise;
@@ -319,7 +323,9 @@ export async function settleProvisionalAdmission(
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
     include: {
-      batch: true,
+      // `include: { course: ... }` on the batch so the inherited course fee is
+      // in hand — `batch: true` alone would silently resolve to the floor.
+      batch: { include: { course: { select: { registrationFeePaise: true } } } },
       student: {
         include: {
           feeAssignments: {
@@ -396,7 +402,9 @@ export async function reinstateProvisionalAdmission(
   const application = await db.application.findUnique({
     where: { id: applicationId },
     include: {
-      batch: true,
+      // `include: { course: ... }` on the batch so the inherited course fee is
+      // in hand — `batch: true` alone would silently resolve to the floor.
+      batch: { include: { course: { select: { registrationFeePaise: true } } } },
       student: {
         include: {
           feeAssignments: {

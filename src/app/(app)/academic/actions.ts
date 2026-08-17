@@ -112,6 +112,7 @@ const courseSchema = z.object({
   durationYears: intInput("Duration (years)", { min: 1, max: 10 }),
   // Spec 5.2 — single-semester courses are not allowed.
   totalSemesters: intInput("Total semesters", { min: 2, max: 20 }),
+  registrationFeePaise: rupeeAmount("Registration fee", { min: 0 }),
   status: z.enum(["ACTIVE", "INACTIVE", "DISCONTINUED"]),
 });
 
@@ -127,6 +128,18 @@ export async function saveCourseAction(_prev: unknown, formData: FormData): Prom
 
     const department = await prisma.department.findUnique({ where: { id: data.departmentId } });
     if (!department) return fail("Select a valid department.", { departmentId: ["Unknown department."] });
+
+    // The institute-wide figure is the floor, here as on the batch: a course may
+    // charge more to register but never less.
+    const config = await getConfig();
+    if (data.registrationFeePaise < config.minRegistrationFeePaise) {
+      return fail(
+        `The registration fee cannot be below the institute minimum of ${formatPaise(
+          config.minRegistrationFeePaise,
+        )}.`,
+        { registrationFeePaise: [`Minimum ${formatPaise(config.minRegistrationFeePaise)}.`] },
+      );
+    }
 
     if (id) {
       const existing = await prisma.course.findUnique({
@@ -207,7 +220,8 @@ const batchSchema = z
     completionDate: dateInput("Completion date"),
     totalSeats: intInput("Total seats", { min: 1, max: 10000 }),
     tuitionFeePaise: rupeeAmount("Preset batch fee", { min: 0 }),
-    registrationFeePaise: rupeeAmount("Registration fee", { min: 0 }),
+    // Blank is the ordinary case: the batch then follows its course.
+    registrationFeePaise: optionalRupeeAmount("Registration fee override"),
     status: z.enum(["UPCOMING", "ONGOING", "COMPLETED", "DISCONTINUED"]),
   })
   .refine((data) => data.completionDate > data.startDate, {
@@ -223,29 +237,28 @@ export async function saveBatchAction(_prev: unknown, formData: FormData): Promi
 
     const { id, tuitionFeePaise, ...data } = parsed.data;
 
-    // The institute-wide figure is a floor, not a default: a batch may charge
-    // more to register but never less, so one setting still governs the whole
-    // institute's minimum however many batches exist.
+    // Only when an override is actually given — blank means "follow the course",
+    // which is the ordinary case and needs no checking here.
     const config = await getConfig();
-    if (data.registrationFeePaise < config.minRegistrationFeePaise) {
-      return fail(
-        `The registration fee cannot be below the institute minimum of ${formatPaise(
-          config.minRegistrationFeePaise,
-        )}.`,
-        { registrationFeePaise: [`Minimum ${formatPaise(config.minRegistrationFeePaise)}.`] },
-      );
-    }
-    // Installment 1 is this amount, and the plan has to add up to the batch's
-    // fee — so a registration fee above the tuition can never be scheduled.
-    // Caught here, where it is the batch's setting, rather than at the fee plan
-    // where it would read as the Registrar's mistake.
-    if (data.registrationFeePaise > tuitionFeePaise) {
-      return fail(
-        `The registration fee cannot exceed the batch fee of ${formatPaise(
-          tuitionFeePaise,
-        )} — installment 1 is the registration fee.`,
-        { registrationFeePaise: [`Maximum ${formatPaise(tuitionFeePaise)}.`] },
-      );
+    if (data.registrationFeePaise !== null) {
+      if (data.registrationFeePaise < config.minRegistrationFeePaise) {
+        return fail(
+          `The registration fee cannot be below the institute minimum of ${formatPaise(
+            config.minRegistrationFeePaise,
+          )}.`,
+          { registrationFeePaise: [`Minimum ${formatPaise(config.minRegistrationFeePaise)}.`] },
+        );
+      }
+      // Installment 1 is this amount and the plan has to add up to the batch's
+      // fee, so an override above the tuition could never be scheduled.
+      if (data.registrationFeePaise > tuitionFeePaise) {
+        return fail(
+          `The registration fee cannot exceed the batch fee of ${formatPaise(
+            tuitionFeePaise,
+          )} — installment 1 is the registration fee.`,
+          { registrationFeePaise: [`Maximum ${formatPaise(tuitionFeePaise)}.`] },
+        );
+      }
     }
 
     const clash = await prisma.batch.findFirst({ where: { code: data.code, ...(id ? { NOT: { id } } : {}) } });

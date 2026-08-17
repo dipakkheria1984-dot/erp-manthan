@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ActionForm, Modal, SubmitButton, fieldError, type FormState } from "@/components/form";
 import { Button, Field, FormGrid, Input, Select } from "@/components/ui";
+import { paiseToRupees } from "@/lib/money";
 import { deleteCourseAction, saveCourseAction } from "../actions";
 
 type Option = { id: string; name: string };
@@ -13,6 +14,8 @@ type CourseView = {
   departmentId: string;
   durationYears: number;
   totalSemesters: number;
+  /** Null on a course created before this was settable — the field offers the institute minimum. */
+  registrationFeePaise: number | null;
   status: "ACTIVE" | "INACTIVE" | "DISCONTINUED";
 };
 
@@ -20,11 +23,14 @@ function CourseFields({
   course,
   departments,
   semesterCountLocked,
+  minRegistrationFeePaise,
   state,
 }: {
   course?: CourseView;
   departments: Option[];
   semesterCountLocked?: boolean;
+  /** The institute-wide floor, offered as the starting value. */
+  minRegistrationFeePaise: number;
   state: FormState;
 }) {
   const key = course?.id ?? "new";
@@ -83,11 +89,36 @@ function CourseFields({
           required
         />
       </Field>
+      <Field
+        label="Registration fee (₹)"
+        htmlFor={`reg-${key}`}
+        required
+        hint="Applies to every batch of this course, including ones created later. Installment 1 is this amount, and the admission stays provisional until it is cleared."
+        error={fieldError(state, "registrationFeePaise")}
+      >
+        <Input
+          id={`reg-${key}`}
+          name="registrationFeePaise"
+          inputMode="decimal"
+          defaultValue={
+            course?.registrationFeePaise != null
+              ? String(paiseToRupees(course.registrationFeePaise))
+              : String(paiseToRupees(minRegistrationFeePaise))
+          }
+          required
+        />
+      </Field>
     </FormGrid>
   );
 }
 
-export function CourseEditor({ departments }: { departments: Option[] }) {
+export function CourseEditor({
+  departments,
+  minRegistrationFeePaise,
+}: {
+  departments: Option[];
+  minRegistrationFeePaise: number;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -98,7 +129,7 @@ export function CourseEditor({ departments }: { departments: Option[] }) {
         <ActionForm action={saveCourseAction} onSuccess={() => setOpen(false)}>
           {(state) => (
             <>
-              <CourseFields departments={departments} state={state} />
+              <CourseFields departments={departments} state={state} minRegistrationFeePaise={minRegistrationFeePaise} />
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
                   Cancel
@@ -118,11 +149,13 @@ export function CourseRowActions({
   departments,
   semesterCountLocked,
   canDelete,
+  minRegistrationFeePaise,
 }: {
   course: CourseView;
   departments: Option[];
   semesterCountLocked: boolean;
   canDelete: boolean;
+  minRegistrationFeePaise: number;
 }) {
   const [editing, setEditing] = useState(false);
   return (
@@ -148,6 +181,7 @@ export function CourseRowActions({
                 departments={departments}
                 semesterCountLocked={semesterCountLocked}
                 state={state}
+                minRegistrationFeePaise={minRegistrationFeePaise}
               />
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setEditing(false)}>

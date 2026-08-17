@@ -54,41 +54,54 @@ export function currentTuitionRate(batchId: string, db: Db = prisma): Promise<nu
  * guard against an older row rather than routine behaviour.
  */
 export function registrationFeeFor(
-  batch: { registrationFeePaise: number | null },
+  batch: { registrationFeePaise: number | null; course?: { registrationFeePaise: number | null } | null },
   config: { minRegistrationFeePaise: number },
 ): number {
-  if (batch.registrationFeePaise === null) return config.minRegistrationFeePaise;
-  return Math.max(batch.registrationFeePaise, config.minRegistrationFeePaise);
+  // Batch first so an exceptional cohort can differ, then the course, which is
+  // where the fee is normally set and which every batch of it follows —
+  // including batches created after the figure was decided. The institute
+  // minimum is the last resort and, either way, the floor.
+  const chosen = batch.registrationFeePaise ?? batch.course?.registrationFeePaise ?? null;
+  if (chosen === null) return config.minRegistrationFeePaise;
+  return Math.max(chosen, config.minRegistrationFeePaise);
+}
+
+/** The course's own figure, for screens that have no batch in hand. */
+export function courseRegistrationFee(
+  course: { registrationFeePaise: number | null },
+  config: { minRegistrationFeePaise: number },
+): number {
+  if (course.registrationFeePaise === null) return config.minRegistrationFeePaise;
+  return Math.max(course.registrationFeePaise, config.minRegistrationFeePaise);
 }
 
 /**
  * The registration fee to quote an applicant who has chosen a course but not a
  * batch — the online admission form, where the batch is the office's to set.
  *
- * The figure comes from the batch they would most likely land in: open
- * (upcoming or ongoing), still holding a free seat, and starting soonest.
- * Where a course has several such batches at different fees this picks one of
- * them, so the amount is quoted as indicative and the batch it came from is
- * named on screen — the office sets the real batch, and the balance either way
- * is collected at the counter.
- *
- * `null` when the course has no open batch at all: there is then no honest
- * figure to quote, and the caller falls back to the institute minimum.
+ * Now that the fee lives on the course this is simply that figure, and the
+ * quote is exact rather than a guess at which batch they will land in. It stops
+ * being exact only where a batch overrides the course, which is the exception;
+ * `exact` says which case the caller is in so the screen can be honest about it.
  */
 export async function registrationFeeForCourse(
   courseId: string,
   config: { minRegistrationFeePaise: number },
   db: Db = prisma,
-): Promise<{ amountPaise: number; batchName: string | null }> {
-  const batches = await db.batch.findMany({
-    where: { courseId, status: { in: ["UPCOMING", "ONGOING"] } },
-    include: { _count: { select: { students: true } } },
-    orderBy: { startDate: "asc" },
+): Promise<{ amountPaise: number; exact: boolean }> {
+  const course = await db.course.findUnique({
+    where: { id: courseId },
+    select: { registrationFeePaise: true },
+  });
+  if (!course) return { amountPaise: config.minRegistrationFeePaise, exact: false };
+
+  // An override on any batch they might be placed into means the course figure
+  // is the likely amount rather than the certain one.
+  const overrides = await db.batch.count({
+    where: { courseId, status: { in: ["UPCOMING", "ONGOING"] }, registrationFeePaise: { not: null } },
   });
 
-  const open = batches.find((batch) => batch._count.students < batch.totalSeats);
-  if (!open) return { amountPaise: config.minRegistrationFeePaise, batchName: null };
-  return { amountPaise: registrationFeeFor(open, config), batchName: open.name };
+  return { amountPaise: courseRegistrationFee(course, config), exact: overrides === 0 };
 }
 
 export type InstallmentDraft = { seqNo: number; dueDate: Date; amountPaise: number };

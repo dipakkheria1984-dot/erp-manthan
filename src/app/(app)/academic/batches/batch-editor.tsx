@@ -107,22 +107,19 @@ function BatchFields({
           />
         </Field>
         <Field
-          label="Registration fee (₹)"
+          label="Registration fee override (₹)"
           htmlFor={`reg-${key}`}
-          required
-          hint="What a new admission pays to register. Installment 1 is this amount, and the admission stays provisional until it is cleared."
+          hint="Leave blank to use the course's registration fee, which is the normal case. Fill it in only for a batch on different terms."
           error={fieldError(state, "registrationFeePaise")}
         >
           <Input
             id={`reg-${key}`}
             name="registrationFeePaise"
             inputMode="decimal"
+            placeholder="Uses the course fee"
             defaultValue={
-              batch?.registrationFeePaise != null
-                ? String(paiseToRupees(batch.registrationFeePaise))
-                : String(paiseToRupees(minRegistrationFeePaise))
+              batch?.registrationFeePaise != null ? String(paiseToRupees(batch.registrationFeePaise)) : ""
             }
-            required
           />
         </Field>
       </FormGrid>
