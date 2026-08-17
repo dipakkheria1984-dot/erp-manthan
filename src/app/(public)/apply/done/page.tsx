@@ -24,6 +24,14 @@ export default async function ApplyDonePage() {
           <li>They place you in a batch for the course you chose.</li>
           <li>They contact you about the course fees and how to pay them.</li>
         </ol>
+        {/* Generic on purpose: the link is destroyed as the form is sent, so
+            this page cannot know which documents were outstanding. */}
+        <div className="mt-4">
+          <Alert tone="warning" title="If you did not upload every document">
+            Please bring a physical copy of anything still outstanding to the admissions office once your
+            admission is confirmed. Your application is not held up by it.
+          </Alert>
+        </div>
         <p className="mt-4 text-sm text-muted">
           Your form link no longer works, so keep any reference the office gives you.
           {institute?.contactPhone || institute?.contactEmail ? (

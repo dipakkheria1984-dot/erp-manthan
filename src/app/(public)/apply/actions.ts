@@ -142,7 +142,9 @@ export async function savePortalStudentInfoAction(
   _prev: unknown,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
-  return runAction(async () => {
+  let next: string | null = null;
+
+  const result = await runAction(async () => {
     const parsed = studentSchema.safeParse(formObject(formData));
     if (!parsed.success) return fail("Please correct the highlighted fields.", fieldErrorsOf(parsed.error));
 
@@ -150,9 +152,20 @@ export async function savePortalStudentInfoAction(
     const application = await requireEditableApplication(token);
 
     await prisma.application.update({ where: { id: application.id }, data });
-    revalidatePath(`/apply/${token}/student`);
+    // No `revalidatePath`: the redirect below leaves this route, so the next
+    // render is fresh anyway. It also must not sit between the write and the
+    // redirect target — a throw there would save the details, skip the
+    // continue, and still tell the applicant it had gone wrong.
+    next = `/apply/${token}/guardians`;
     return ok(undefined, "Your details have been saved.");
   });
+
+  // The button says "Save and continue", so it has to do both. Outside
+  // `runAction` because `redirect` works by throwing, and `runAction` treats an
+  // unrecognised throw as a failure — which would tell the applicant their
+  // details had not saved when they had.
+  if (result.ok && next) redirect(next);
+  return result;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -260,7 +273,9 @@ export async function savePortalCourseAction(
   _prev: unknown,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
-  return runAction(async () => {
+  let next: string | null = null;
+
+  const result = await runAction(async () => {
     const parsed = courseSchema.safeParse(formObject(formData));
     if (!parsed.success) return fail("Please correct the highlighted fields.", fieldErrorsOf(parsed.error));
 
@@ -283,9 +298,14 @@ export async function savePortalCourseAction(
       data: { departmentId, courseId },
     });
 
-    revalidatePath(`/apply/${token}/course`);
+    // As above: the redirect re-renders, so there is nothing to revalidate here.
+    next = `/apply/${token}/documents`;
     return ok(undefined, "Course choice saved.");
   });
+
+  // See `savePortalStudentInfoAction` for why this cannot sit inside runAction.
+  if (result.ok && next) redirect(next);
+  return result;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -369,15 +389,19 @@ export async function finishPortalApplicationAction(
       prisma.documentRequirement.findMany({ where: { isActive: true, isRequired: true } }),
     ]);
 
+    // Documents deliberately do not gate this. An applicant who cannot scan a
+    // certificate can bring the physical copy to the office after their
+    // admission is confirmed, and turning them away at the last screen loses an
+    // application over a missing scanner. They are warned instead — on the
+    // finish screen, on the confirmation, and to the office in its email.
     const missing: string[] = [];
     if (!application.courseId) missing.push("your department and course");
     if (guardianCount === 0) missing.push("at least one parent or guardian");
 
+    if (missing.length > 0) return fail(`Still needed before you can finish: ${missing.join("; ")}.`);
+
     const uploaded = new Set(documents.map((d) => d.requirementCode));
     const missingDocs = requirements.filter((r) => !uploaded.has(r.code));
-    if (missingDocs.length > 0) missing.push(missingDocs.map((r) => r.label).join(", "));
-
-    if (missing.length > 0) return fail(`Still needed before you can finish: ${missing.join("; ")}.`);
 
     await prisma.application.update({
       where: { id: application.id },
@@ -396,10 +420,14 @@ export async function finishPortalApplicationAction(
       entityType: "Application",
       entityId: application.id,
       summary: `${application.fullName} completed the online admission form`,
-      metadata: { guardians: guardianCount, documents: documents.length },
+      metadata: {
+        guardians: guardianCount,
+        documents: documents.length,
+        documentsOutstanding: missingDocs.map((requirement) => requirement.label),
+      },
     });
 
-    await notifyOfficeOfApplication(application).catch((error) => {
+    await notifyOfficeOfApplication(application, missingDocs.map((r) => r.label)).catch((error) => {
       console.error("[apply] could not notify the office", error);
     });
 

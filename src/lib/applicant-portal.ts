@@ -191,8 +191,18 @@ export async function sendApplicantLink(application: Application, token: string)
   });
 }
 
-/** Tells the office an online form has come in and is waiting on them. */
-export async function notifyOfficeOfApplication(application: Application): Promise<void> {
+/**
+ * Tells the office an online form has come in and is waiting on them.
+ *
+ * `outstandingDocuments` are the required ones the applicant did not upload.
+ * Uploading is not compulsory — they may bring physical copies once their
+ * admission is confirmed — so the office needs to know what to ask for rather
+ * than the applicant being stopped at the last screen.
+ */
+export async function notifyOfficeOfApplication(
+  application: Application,
+  outstandingDocuments: string[] = [],
+): Promise<void> {
   const institute = await getInstitute().catch(() => null);
   if (!institute?.contactEmail) return;
 
@@ -218,8 +228,11 @@ export async function notifyOfficeOfApplication(application: Application): Promi
       `Course: ${course?.name ?? "—"}\n` +
       `Phone: ${application.phone || "—"}\n` +
       `Email: ${application.email || "—"}\n` +
-      `Documents uploaded: ${documentCount}\n\n` +
-      `The batch, fee plan and registration fee are still to be set. Open it here:\n` +
+      `Documents uploaded: ${documentCount}\n` +
+      (outstandingDocuments.length > 0
+        ? `Still to be collected in physical copy: ${outstandingDocuments.join(", ")}\n`
+        : `Nothing outstanding — every required document was uploaded.\n`) +
+      `\nThe batch, fee plan and registration fee are still to be set. Open it here:\n` +
       `${appBaseUrl()}/enrollment/${application.id}\n`,
   });
 }

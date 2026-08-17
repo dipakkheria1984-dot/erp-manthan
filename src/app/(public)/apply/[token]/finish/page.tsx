@@ -35,11 +35,11 @@ export default async function PortalFinishPage({ params }: { params: Promise<{ t
   const missingDocuments = requirements.filter((requirement) => !uploaded.has(requirement.code));
 
   // Mirrors the check in `finishPortalApplicationAction`. Shown here so the
-  // applicant can fix it, enforced there so it cannot be skipped.
+  // applicant can fix it, enforced there so it cannot be skipped. Documents are
+  // not on this list on purpose — see the warning below.
   const missing = [
     application.courseId ? null : "Choose your department and course",
     guardianCount > 0 ? null : "Add at least one parent or guardian",
-    ...missingDocuments.map((requirement) => `Upload your ${requirement.label}`),
   ].filter(Boolean) as string[];
 
   return (
@@ -66,12 +66,31 @@ export default async function PortalFinishPage({ params }: { params: Promise<{ t
             ))}
           </ul>
         </Alert>
-      ) : (
+      ) : null}
+
+      {missingDocuments.length > 0 ? (
+        <Alert tone="warning" title="You have not uploaded every document">
+          <p>
+            You can still send your form in. These are outstanding:
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {missingDocuments.map((requirement) => (
+              <li key={requirement.id}>{requirement.label}</li>
+            ))}
+          </ul>
+          <p className="mt-2">
+            Please bring a physical copy of each to the admissions office once your admission is confirmed.
+            Uploading them now is quicker if you can — you can go back to the Documents step before sending.
+          </p>
+        </Alert>
+      ) : null}
+
+      {missing.length === 0 ? (
         <Alert tone="info" title="What happens next">
           Once you send this in, you will not be able to change it. The admissions office will check your
-          documents, place you in a batch, and contact you about the course fees and how to pay them.
+          details, place you in a batch, and contact you about the course fees and how to pay them.
         </Alert>
-      )}
+      ) : null}
 
       <FinishForm token={token} ready={missing.length === 0} />
     </div>

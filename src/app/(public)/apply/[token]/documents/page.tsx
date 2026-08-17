@@ -18,9 +18,10 @@ export default async function PortalDocumentsPage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
-      <Alert tone="info">
-        Upload a clear scan or photo of each document — PDF, JPG or PNG. You can replace a file any time
-        before you finish. The office checks them after your form comes in.
+      <Alert tone="info" title="Uploading now is optional">
+        Upload a clear scan or photo of each document if you can — PDF, JPG or PNG — and you can replace a
+        file any time before you finish. If you are not able to, send your form in anyway and bring a
+        physical copy of anything missing to the admissions office once your admission is confirmed.
       </Alert>
 
       <Card title="Your documents">

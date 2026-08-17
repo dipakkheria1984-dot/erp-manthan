@@ -48,7 +48,7 @@ export default async function ApplyPage() {
           <li>Your personal and contact details</li>
           <li>Your parent or guardian&rsquo;s details</li>
           <li>The department and course you want to apply for</li>
-          <li>Scanned copies of your documents (PDF, JPG or PNG)</li>
+          <li>Scanned copies of your documents, if you have them (PDF, JPG or PNG)</li>
         </ol>
         {requirements.length > 0 ? (
           <div className="mt-4">
@@ -64,6 +64,10 @@ export default async function ApplyPage() {
           </div>
         ) : null}
         <p className="mt-4 text-sm text-muted">
+          If you cannot upload a document you can still send your form in — bring a physical copy to the
+          admissions office once your admission is confirmed.
+        </p>
+        <p className="mt-2 text-sm text-muted">
           You do not pay anything here. Once your form is in, the admissions office will check it and contact
           you about the course fees and how to pay them.
         </p>
