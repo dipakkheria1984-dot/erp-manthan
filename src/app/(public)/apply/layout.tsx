@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { connection } from "next/server";
 import { getInstitute } from "@/lib/config";
 
 /**
@@ -11,6 +12,10 @@ import { getInstitute } from "@/lib/config";
  * form, nothing else about the system.
  */
 export default async function ApplyLayout({ children }: { children: ReactNode }) {
+  // Read at request time, not baked in at build: the institute's name and the
+  // contact details in the footer are edited in Setup and must not be a
+  // snapshot of whatever they were when the deployment was built.
+  await connection();
   const institute = await getInstitute().catch(() => null);
 
   return (

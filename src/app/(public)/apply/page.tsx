@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { Alert, Card } from "@/components/ui";
@@ -12,7 +13,19 @@ export const metadata: Metadata = { title: "Apply online" };
  * office's, and saying so here prevents the obvious support call.
  */
 export default async function ApplyPage() {
-  const config = await getConfig().catch(() => null);
+  // Nothing on this page reads a cookie or a header, so Next would otherwise
+  // prerender it at build time — and the answer to "are admissions open?" would
+  // be whatever the database said when the deploy was built, permanently.
+  // Ticking the box in Setup would change the row and never change the page.
+  await connection();
+
+  const config = await getConfig().catch((error) => {
+    // Failing closed is right for a public page, but silently: a broken config
+    // used to be indistinguishable from admissions being shut, which is exactly
+    // how a missing column hid itself once already.
+    console.error("[apply] could not read the institute configuration", error);
+    return null;
+  });
 
   if (!config?.onlineAdmissionsEnabled) {
     return (

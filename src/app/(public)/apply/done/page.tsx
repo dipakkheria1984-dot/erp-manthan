@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { getInstitute } from "@/lib/config";
 import { Alert, Card } from "@/components/ui";
 
@@ -9,6 +10,7 @@ export const metadata: Metadata = { title: "Application sent" };
  * so a confirmation under it would fail the moment it was rendered.
  */
 export default async function ApplyDonePage() {
+  await connection();
   const institute = await getInstitute().catch(() => null);
 
   return (
