@@ -25,11 +25,19 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
   const batchId = one(params.batchId);
   const from = one(params.from);
   const to = one(params.to);
+  const queue = one(params.queue);
   const page = Math.max(1, Number.parseInt(one(params.page) || "1", 10) || 1);
 
   const where = {
     ...(status ? { status: status as ApplicationStatus } : {}),
     ...(batchId ? { batchId } : {}),
+    // An online form the applicant has finished stays DRAFT — submission is the
+    // office's act, once the batch, fee plan and registration fee are set. This
+    // is the list of the ones waiting for exactly that.
+    ...(queue === "awaiting-fee"
+      ? { source: "ONLINE" as const, status: "DRAFT" as const, applicantSubmittedAt: { not: null } }
+      : {}),
+    ...(queue === "online" ? { source: "ONLINE" as const } : {}),
     ...(q
       ? {
           OR: [
@@ -65,7 +73,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (next: number) => {
     const sp = new URLSearchParams();
-    for (const [k, v] of Object.entries({ q, status, batchId, from, to })) if (v) sp.set(k, v);
+    for (const [k, v] of Object.entries({ q, status, batchId, from, to, queue })) if (v) sp.set(k, v);
     sp.set("page", String(next));
     return `/enrollment?${sp.toString()}`;
   };
@@ -82,7 +90,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
         <Card>
           <ApplicationFilters
             batches={batches.map((b) => ({ id: b.id, name: `${b.code} — ${b.name}` }))}
-            defaults={{ q, status, batchId, from, to }}
+            defaults={{ q, status, batchId, from, to, queue }}
           />
         </Card>
 
@@ -137,6 +145,11 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
                           <Badge tone="success">Confirmed</Badge>
                         ) : null}
                         {application.scholarshipNeedsApproval ? <Badge tone="info">Discount approval</Badge> : null}
+                        {application.source === "ONLINE" && application.applicantSubmittedAt ? (
+                          <Badge tone="info">Awaiting fee assignment</Badge>
+                        ) : application.source === "ONLINE" ? (
+                          <Badge>Applicant filling in</Badge>
+                        ) : null}
                       </div>
                     </Td>
                   </Tr>

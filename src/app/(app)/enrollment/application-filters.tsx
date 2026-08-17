@@ -9,7 +9,7 @@ export function ApplicationFilters({
   defaults,
 }: {
   batches: { id: string; name: string }[];
-  defaults: { q: string; status: string; batchId: string; from: string; to: string };
+  defaults: { q: string; status: string; batchId: string; from: string; to: string; queue: string };
 }) {
   return (
     <form method="get" className="space-y-4">
@@ -28,6 +28,17 @@ export function ApplicationFilters({
                   .join(" ")}
               </option>
             ))}
+          </Select>
+        </Field>
+        <Field
+          label="Queue"
+          htmlFor="queue"
+          hint="Online forms the applicant has finished and nobody has picked up."
+        >
+          <Select id="queue" name="queue" defaultValue={defaults.queue}>
+            <option value="">Everything</option>
+            <option value="awaiting-fee">Awaiting fee assignment</option>
+            <option value="online">All online applications</option>
           </Select>
         </Field>
         <Field label="Batch" htmlFor="batchId">

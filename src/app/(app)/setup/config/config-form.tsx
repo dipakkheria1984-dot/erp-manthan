@@ -2,10 +2,11 @@
 
 import type { InstituteConfig } from "@/generated/prisma/client";
 import { ActionForm, SubmitButton, fieldError } from "@/components/form";
-import { Alert, Card, Field, FormActions, FormGrid, Input } from "@/components/ui";
+import { Alert, Card, Checkbox, Field, FormActions, FormGrid, Input } from "@/components/ui";
 import { toDateInput } from "@/lib/dates";
 import { paiseToRupees } from "@/lib/money";
 import { saveConfigAction } from "../actions";
+import { OnlineAdmissionsLink } from "./online-admissions-link";
 
 export function ConfigForm({ config }: { config: InstituteConfig }) {
   const rupees = (paise: number) => String(paiseToRupees(paise));
@@ -156,6 +157,63 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
                   type="number"
                   min={1}
                   defaultValue={config.overdueReminderIntervalDays}
+                  required
+                />
+              </Field>
+            </FormGrid>
+          </Card>
+
+          <Card
+            title="Online admissions"
+            description="Publishes a public admission form applicants can fill in themselves. They stop after uploading their documents — the batch, fee plan and registration fee stay with the office."
+          >
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="onlineAdmissionsEnabled"
+                name="onlineAdmissionsEnabled"
+                defaultChecked={config.onlineAdmissionsEnabled}
+              />
+              <label htmlFor="onlineAdmissionsEnabled" className="text-sm">
+                Accept applications through the public link
+              </label>
+            </div>
+
+            <div className="mt-4">
+              <OnlineAdmissionsLink enabled={config.onlineAdmissionsEnabled} />
+            </div>
+
+            <FormGrid cols={2}>
+              <Field
+                label="New applications per hour, per visitor"
+                htmlFor="onlineAdmissionsPerHour"
+                required
+                hint="Anyone with the address can start an application, so the rate is capped."
+                error={fieldError(state, "onlineAdmissionsPerHour")}
+              >
+                <Input
+                  id="onlineAdmissionsPerHour"
+                  name="onlineAdmissionsPerHour"
+                  type="number"
+                  min={1}
+                  max={100}
+                  defaultValue={config.onlineAdmissionsPerHour}
+                  required
+                />
+              </Field>
+              <Field
+                label="Applicant link valid for (days)"
+                htmlFor="onlineAdmissionsLinkDays"
+                required
+                hint="How long an applicant can keep coming back to finish their form."
+                error={fieldError(state, "onlineAdmissionsLinkDays")}
+              >
+                <Input
+                  id="onlineAdmissionsLinkDays"
+                  name="onlineAdmissionsLinkDays"
+                  type="number"
+                  min={1}
+                  max={365}
+                  defaultValue={config.onlineAdmissionsLinkDays}
                   required
                 />
               </Field>

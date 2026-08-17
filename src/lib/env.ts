@@ -38,9 +38,25 @@ function blobToken(): string {
   return "";
 }
 
+/**
+ * Where this deployment answers, used to build absolute links inside emails —
+ * an applicant's resume link, and the office's pointer back at an application.
+ *
+ * `APP_URL` wins so a custom domain can be stated outright. Vercel otherwise
+ * supplies the project's production host; note it carries no scheme.
+ */
+function appUrl(): string {
+  const explicit = process.env.APP_URL;
+  if (explicit) return explicit;
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (vercel) return `https://${vercel}`;
+  return "http://localhost:3000";
+}
+
 export const env = {
   databaseUrl: required("DATABASE_URL"),
   authSecret: required("AUTH_SECRET"),
+  appUrl: appUrl(),
   sessionTtlHours: optionalInt("SESSION_TTL_HOURS", 12),
   uploadDir: process.env.UPLOAD_DIR ?? "./storage/uploads",
   maxUploadMb: optionalInt("MAX_UPLOAD_MB", 5),

@@ -60,6 +60,14 @@ enum ApplicationStatus {
   ENROLLED
 }
 
+/// Who typed the application in. An ONLINE one was filled by the applicant
+/// through the public link and stops after documents — the fee plan, the
+/// registration fee and the submission itself are always the office's.
+enum ApplicationSource {
+  OFFICE
+  ONLINE
+}
+
 enum DocumentStatus {
   PENDING
   VERIFIED
@@ -121,6 +129,12 @@ enum NotificationKind {
   APPLICATION_INCOMPLETE
   DOCUMENTS_PENDING
   WELCOME
+  /// The resume link for a half-finished online admission form, sent to the
+  /// applicant so they can come back to it.
+  APPLICATION_LINK
+  /// Sent to the institute when an applicant finishes the online form, so a
+  /// waiting application does not depend on somebody watching the list.
+  APPLICATION_ONLINE_RECEIVED
   FEE_PRE_DUE
   FEE_OVERDUE
   RECEIPT
@@ -198,9 +212,9 @@ model InstituteConfig {
   installmentMax Int @default(14)
 
   // Late fee
-  lateFeeGraceDays             Int @default(0)
+  lateFeeGraceDays             Int       @default(0)
   /// If the remaining unpaid balance is at or below this, no late fee applies.
-  minOutstandingThresholdPaise Int @default(50000) // ₹500
+  minOutstandingThresholdPaise Int       @default(50000) // ₹500
   /// The day the late fee policy starts counting. Nothing accrues for time
   /// before it, however long an installment has been overdue — an institute
   /// going live, or forgiving everything up to a date, sets it and every
@@ -214,6 +228,17 @@ model InstituteConfig {
   // Reminder cadence (spec 3.3 / 9.3)
   preDueReminderDays          Int @default(7)
   overdueReminderIntervalDays Int @default(3)
+
+  // Online admissions
+  /// Publishes the public admission form at /apply. Off by default: turning it
+  /// on opens a route that anyone with the address can start an application
+  /// through, which is an institute decision rather than a deployment default.
+  onlineAdmissionsEnabled  Boolean @default(false)
+  /// Applications one address may start per hour. The public form is the only
+  /// unauthenticated way into the database, so it is metered.
+  onlineAdmissionsPerHour  Int     @default(3)
+  /// How long an applicant's resume link stays usable.
+  onlineAdmissionsLinkDays Int     @default(30)
 
   // Numbering (spec 9.4)
   receiptPrefix      String @default("RCP")
@@ -255,6 +280,22 @@ model CommunicationConfig {
 
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+/// Fixed-window counter behind the public admission form's abuse limits.
+///
+/// Keyed on what is being limited and who is doing it — the caller's address —
+/// with one row per window. It lives in the database rather than in memory
+/// because serverless instances share nothing: an in-process counter would
+/// reset on every cold start and be enforced separately per instance, which is
+/// no limit at all.
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([windowStart])
 }
 
 /// Institute-wide late fee slabs (spec 3.2). `maxDaysOverdue` null = open ended.
@@ -531,6 +572,21 @@ model Application {
   applicationNo String?           @unique
   status        ApplicationStatus @default(DRAFT)
 
+  // --- Online admission form -------------------------------------------------
+  source ApplicationSource @default(OFFICE)
+
+  /// SHA-256 of the applicant's resume token, never the token itself: the link
+  /// is the only credential on the public form, so a leaked database must not
+  /// hand over every open application. Cleared once the applicant is finished.
+  portalTokenHash      String?   @unique
+  portalTokenExpiresAt DateTime?
+
+  /// When the applicant finished their part — personal details, guardians,
+  /// department and course, documents. The record stays DRAFT: submission is
+  /// still the office's act, after the batch, fee plan and registration fee are
+  /// set. This is what puts the row on the "awaiting fee assignment" list.
+  applicantSubmittedAt DateTime?
+
   // 1. Student information
   fullName   String
   dob        DateTime?
@@ -615,6 +671,9 @@ model Application {
   @@index([departmentId])
   @@index([fullName])
   @@index([createdAt])
+  /// Backs the "awaiting fee assignment" list — online applications the
+  /// applicant has finished but the office has not picked up.
+  @@index([status, source, applicantSubmittedAt])
 }
 
 /// At least one guardian is compulsory before an application can be submitted
@@ -889,16 +948,16 @@ model Installment {
   /// Anything already collected against a late fee is not refunded.
   /// Part of the accrued late fee written off. A full waiver also sets
   /// `lateFeeWaived`, which stops anything further accruing.
-  lateFeeWaivedPaise  Int       @default(0)
+  lateFeeWaivedPaise   Int       @default(0)
   /// Late fee that had already been collected when it was waived. The money is
   /// not refunded: it is credited against what the family owes next, as a
   /// `LATE_FEE_ADJUSTMENT` discount. Recorded here so restoring the late fee
   /// cannot quietly charge them twice.
-  lateFeeCreditedPaise Int      @default(0)
-  lateFeeWaived       Boolean   @default(false)
-  lateFeeWaivedAt     DateTime?
-  lateFeeWaivedById   String?
-  lateFeeWaivedReason String?
+  lateFeeCreditedPaise Int       @default(0)
+  lateFeeWaived        Boolean   @default(false)
+  lateFeeWaivedAt      DateTime?
+  lateFeeWaivedById    String?
+  lateFeeWaivedReason  String?
 
   /// Cached sum of the active discounts against this installment, maintained by
   /// `refreshInstallment` exactly as `lateFeePaise` is. The Discount rows are
@@ -932,12 +991,12 @@ model Installment {
   lateFeeWaivedBy User?         @relation("InstallmentLateFeeWaivedBy", fields: [lateFeeWaivedById], references: [id])
   raisedBy        User?         @relation("InstallmentRaisedBy", fields: [raisedById], references: [id])
 
-  payments      Payment[]
-  discounts     Discount[]        @relation("DiscountInstallment")
+  payments       Payment[]
+  discounts      Discount[]        @relation("DiscountInstallment")
   /// Credits handed back elsewhere because this installment's collected late
   /// fee was waived.
-  lateFeeCredits Discount[]       @relation("DiscountLateFeeSource")
-  notifications NotificationLog[]
+  lateFeeCredits Discount[]        @relation("DiscountLateFeeSource")
+  notifications  NotificationLog[]
 
   @@unique([feeAssignmentId, seqNo])
   @@index([dueDate, status])
@@ -1004,11 +1063,11 @@ model Discount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  installment     Installment  @relation("DiscountInstallment", fields: [installmentId], references: [id], onDelete: Cascade)
-  lateFeeSource   Installment? @relation("DiscountLateFeeSource", fields: [lateFeeSourceInstallmentId], references: [id])
-  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  grantedBy   User?       @relation("DiscountGrantedBy", fields: [grantedById], references: [id])
-  cancelledBy User?       @relation("DiscountCancelledBy", fields: [cancelledById], references: [id])
+  installment   Installment  @relation("DiscountInstallment", fields: [installmentId], references: [id], onDelete: Cascade)
+  lateFeeSource Installment? @relation("DiscountLateFeeSource", fields: [lateFeeSourceInstallmentId], references: [id])
+  student       Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  grantedBy     User?        @relation("DiscountGrantedBy", fields: [grantedById], references: [id])
+  cancelledBy   User?        @relation("DiscountCancelledBy", fields: [cancelledById], references: [id])
 
   @@index([installmentId])
   @@index([studentId])
