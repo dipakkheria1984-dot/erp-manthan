@@ -9,6 +9,7 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
 import { Alert, Card, DescriptionList, LinkButton, buttonClass } from "@/components/ui";
 import { WelcomeKitActions } from "@/components/welcome-kit-actions";
+import { DiscardDraftButton } from "./decision-panel";
 import { FeePreviewCard } from "./fee-preview-card";
 import { ReadinessChecklist } from "./readiness-checklist";
 
@@ -80,9 +81,12 @@ export default async function ApplicationOverviewPage({ params }: { params: Prom
           }
           actions={
             canCreate ? (
-              <LinkButton href={`/enrollment/${id}/review`}>
-                {outstanding.length > 0 ? "Open review checklist" : "Review & submit"}
-              </LinkButton>
+              <div className="flex flex-wrap gap-2">
+                <LinkButton href={`/enrollment/${id}/review`}>
+                  {outstanding.length > 0 ? "Open review checklist" : "Review & submit"}
+                </LinkButton>
+                <DiscardDraftButton applicationId={id} />
+              </div>
             ) : null
           }
         >

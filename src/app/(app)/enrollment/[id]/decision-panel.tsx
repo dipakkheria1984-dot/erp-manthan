@@ -5,11 +5,33 @@ import { ActionForm, ReasonActionButton, SubmitButton, fieldError } from "@/comp
 import { Alert, Field, FormGrid, Input, Select } from "@/components/ui";
 import {
   approveApplicationAction,
+  discardApplicationAction,
   rejectApplicationAction,
   startReviewAction,
   submitApplicationAction,
   toggleProvisionalAction,
 } from "../actions";
+
+/**
+ * Only ever shown on a draft. Everything past that point is rejected rather
+ * than deleted — there is an application number in the applicant's hands by
+ * then, and a reason on the record is worth more than a tidy list.
+ */
+export function DiscardDraftButton({ applicationId }: { applicationId: string }) {
+  return (
+    <ReasonActionButton
+      action={discardApplicationAction}
+      label="Discard draft"
+      title="Discard this draft application"
+      description="The draft and everything entered on it — guardians, uploaded documents, the fee plan — are deleted for good. This cannot be undone. The reason you give is kept on the audit trail."
+      confirmLabel="Discard permanently"
+      reasonLabel="Why is this being discarded?"
+      reasonPlaceholder="e.g. duplicate of APP00042, or started in error"
+      variant="danger"
+      hidden={{ applicationId }}
+    />
+  );
+}
 
 export function SubmitApplicationButton({ applicationId, disabled }: { applicationId: string; disabled: boolean }) {
   return (

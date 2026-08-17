@@ -19,6 +19,7 @@ import {
   findDuplicates,
   requiredRegistrationFee,
   settleProvisionalAdmission,
+  statusLabel,
   submissionReadiness,
 } from "@/lib/enrollment";
 import { storeUpload, deleteUpload } from "@/lib/storage";
@@ -600,6 +601,105 @@ export async function toggleProvisionalAction(_prev: unknown, formData: FormData
     revalidatePath(`/enrollment/${applicationId}`);
     return ok(undefined, application.isProvisional ? "Provisional admission withdrawn." : "Provisional admission granted.");
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Discarding a draft                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Throws away a draft that is never going anywhere — a mis-keyed start, a
+ * duplicate, or an online form somebody abandoned half-filled.
+ *
+ * Drafts only. Once an application is submitted it has an application number
+ * quoted to the applicant, and once it is approved there is a student; those
+ * are rejected or handled through status, never deleted.
+ *
+ * The row goes for real, taking its guardians, documents, fee plan and
+ * notifications with it — the schema already cascades those, and a draft has
+ * nothing worth keeping. Two things it cannot take: a payment or a student,
+ * neither of which cascades, so the database would refuse anyway. They are
+ * checked here so the answer is a sentence rather than a constraint violation,
+ * and because money on record means this is not a draft to throw away at all.
+ *
+ * The audit row survives: it holds the id as plain text, not a foreign key, so
+ * the trail of what was discarded and why outlives the record.
+ */
+export async function discardApplicationAction(
+  _prev: unknown,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  let discarded = false;
+
+  const result = await runAction(async () => {
+    const actor = await assertPermission(PERMISSIONS.ENROLLMENT_CREATE);
+    const applicationId = String(formData.get("applicationId") ?? "");
+    const parsedReason = reasonInput.safeParse(String(formData.get("reason") ?? ""));
+    if (!parsedReason.success) {
+      return fail("A reason is required.", { reason: [parsedReason.error.issues[0].message] });
+    }
+
+    const application = await prisma.application.findUnique({
+      where: { id: applicationId },
+      include: {
+        documents: true,
+        student: { select: { studentCode: true } },
+        _count: { select: { payments: true, guardians: true, documents: true } },
+      },
+    });
+    if (!application) return fail("Application not found.");
+
+    if (application.status !== "DRAFT") {
+      return fail(
+        `Only a draft can be discarded — this one is ${statusLabel(application.status).toLowerCase()}. ` +
+          `Reject it instead, which keeps the record and the reason.`,
+      );
+    }
+    if (application.student) {
+      return fail(`${application.student.studentCode} is enrolled against this application. It cannot be discarded.`);
+    }
+    if (application._count.payments > 0) {
+      return fail(
+        `${application._count.payments} payment(s) are recorded against this application. Cancel the receipt(s) ` +
+          `first if they were a mistake — money on record is never thrown away with the draft.`,
+      );
+    }
+
+    // Written before the row goes, so a failure here leaves an audit row for an
+    // application that still exists rather than a deletion with no trace.
+    await recordAudit({
+      userId: actor.id,
+      action: "application.discarded",
+      entityType: "Application",
+      entityId: applicationId,
+      summary: `Draft application for ${application.fullName} discarded`,
+      reason: parsedReason.data,
+      metadata: {
+        source: application.source,
+        guardians: application._count.guardians,
+        documents: application._count.documents,
+        applicantSubmittedAt: application.applicantSubmittedAt?.toISOString() ?? null,
+        claimedPaymentReference: application.claimedPaymentReference,
+      },
+    });
+
+    await prisma.application.delete({ where: { id: applicationId } });
+
+    // Only after the row is gone. Deleting the files first would strand the
+    // uploads if the delete then failed, leaving rows pointing at nothing.
+    for (const document of application.documents) {
+      await deleteUpload(document.storagePath).catch((error) => {
+        console.error("[enrollment] could not remove a discarded application's upload", error);
+      });
+    }
+
+    revalidatePath("/enrollment");
+    discarded = true;
+    return ok(undefined, "Draft discarded.");
+  });
+
+  if (result.ok && discarded) redirect("/enrollment");
+  return result;
 }
 
 /* -------------------------------------------------------------------------- */
