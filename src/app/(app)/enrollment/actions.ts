@@ -534,7 +534,16 @@ export async function recordRegistrationFeeAction(_prev: unknown, formData: Form
       });
       await tx.application.update({
         where: { id: applicationId },
-        data: { registrationFeePaidPaise: { increment: amountPaise } },
+        data: {
+          registrationFeePaidPaise: { increment: amountPaise },
+          // Recording a collection is the office having gone and looked, so an
+          // outstanding online claim stops asking to be checked. The claim
+          // itself is kept — it is what the applicant was told, and the receipt
+          // now standing beside it is the record of what was actually banked.
+          ...(application.claimedPaymentReference && !application.claimedPaymentSettledAt
+            ? { claimedPaymentSettledAt: new Date() }
+            : {}),
+        },
       });
     });
 

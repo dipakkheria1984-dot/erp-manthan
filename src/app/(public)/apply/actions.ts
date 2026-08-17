@@ -15,6 +15,7 @@ import {
   sendApplicantLink,
   withinRateLimit,
 } from "@/lib/applicant-portal";
+import { formatPaise } from "@/lib/money";
 import {
   checkboxInput,
   fieldErrorsOf,
@@ -22,6 +23,7 @@ import {
   optionalDateInput,
   optionalText,
   requiredText,
+  rupeeAmount,
 } from "@/lib/validation";
 
 /**
@@ -355,6 +357,65 @@ export async function uploadPortalDocumentAction(
 
     revalidatePath(`/apply/${token}/documents`);
     return ok(undefined, `${requirement.label} uploaded.`);
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Step 5 — the registration fee                                               */
+/* -------------------------------------------------------------------------- */
+
+const paymentClaimSchema = z.object({
+  token: requiredText("Token"),
+  reference: requiredText("Payment reference", 4),
+  amount: rupeeAmount("Amount paid", { min: 1 }),
+  paidOn: optionalDateInput,
+});
+
+/**
+ * Records what the applicant says they paid on the bank's hosted page.
+ *
+ * It is a claim and nothing else. The bank's page reports nothing back to this
+ * system, so no receipt is issued, no `Payment` row is written, and neither
+ * `registrationFeePaidPaise` nor the provisional flag moves. The office checks
+ * the reference against the bank and records the collection through the normal
+ * registration-fee screen, which is what actually moves money.
+ *
+ * Keeping the two apart is the whole point: a mistyped or invented reference
+ * must never have shifted a balance that then has to be unwound.
+ */
+export async function savePortalPaymentClaimAction(
+  _prev: unknown,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  return runAction(async () => {
+    const parsed = paymentClaimSchema.safeParse(formObject(formData));
+    if (!parsed.success) return fail("Please correct the highlighted fields.", fieldErrorsOf(parsed.error));
+
+    const { token, reference, amount, paidOn } = parsed.data;
+    const application = await requireEditableApplication(token);
+
+    await prisma.application.update({
+      where: { id: application.id },
+      data: {
+        claimedPaymentReference: reference,
+        claimedPaymentPaise: amount,
+        claimedPaymentAt: paidOn ?? new Date(),
+        // A re-entered claim goes back to being unchecked.
+        claimedPaymentSettledAt: null,
+      },
+    });
+
+    await recordAudit({
+      userId: null,
+      action: "application.online_payment_claimed",
+      entityType: "Application",
+      entityId: application.id,
+      summary: `${application.fullName} reported paying ${formatPaise(amount)} online — reference ${reference}`,
+      metadata: { reference, amountPaise: amount },
+    });
+
+    revalidatePath(`/apply/${token}/payment`);
+    return ok(undefined, "Noted. The office will check this against the bank before confirming it.");
   });
 }
 

@@ -228,6 +228,11 @@ const configSchema = z
     onlineAdmissionsEnabled: checkboxInput,
     onlineAdmissionsPerHour: intInput("Applications per hour", { min: 1, max: 100 }),
     onlineAdmissionsLinkDays: intInput("Applicant link validity", { min: 1, max: 365 }),
+    registrationPaymentUrl: optionalText.refine(
+      (value) => !value || /^https:\/\//i.test(value),
+      "Use the full https:// address of the bank's payment page.",
+    ),
+    registrationPaymentNote: optionalText,
     receiptPrefix: requiredText("Receipt prefix").max(10, "Prefix is too long."),
     receiptPadding: intInput("Receipt number length", { min: 1, max: 12 }),
     applicationPrefix: requiredText("Application ID prefix").max(10, "Prefix is too long."),

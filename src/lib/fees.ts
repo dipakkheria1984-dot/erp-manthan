@@ -61,6 +61,36 @@ export function registrationFeeFor(
   return Math.max(batch.registrationFeePaise, config.minRegistrationFeePaise);
 }
 
+/**
+ * The registration fee to quote an applicant who has chosen a course but not a
+ * batch — the online admission form, where the batch is the office's to set.
+ *
+ * The figure comes from the batch they would most likely land in: open
+ * (upcoming or ongoing), still holding a free seat, and starting soonest.
+ * Where a course has several such batches at different fees this picks one of
+ * them, so the amount is quoted as indicative and the batch it came from is
+ * named on screen — the office sets the real batch, and the balance either way
+ * is collected at the counter.
+ *
+ * `null` when the course has no open batch at all: there is then no honest
+ * figure to quote, and the caller falls back to the institute minimum.
+ */
+export async function registrationFeeForCourse(
+  courseId: string,
+  config: { minRegistrationFeePaise: number },
+  db: Db = prisma,
+): Promise<{ amountPaise: number; batchName: string | null }> {
+  const batches = await db.batch.findMany({
+    where: { courseId, status: { in: ["UPCOMING", "ONGOING"] } },
+    include: { _count: { select: { students: true } } },
+    orderBy: { startDate: "asc" },
+  });
+
+  const open = batches.find((batch) => batch._count.students < batch.totalSeats);
+  if (!open) return { amountPaise: config.minRegistrationFeePaise, batchName: null };
+  return { amountPaise: registrationFeeFor(open, config), batchName: open.name };
+}
+
 export type InstallmentDraft = { seqNo: number; dueDate: Date; amountPaise: number };
 
 /** One row as the installment editors post it. `id` is empty on a new row. */

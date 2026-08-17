@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getConfig, getInstitute } from "@/lib/config";
 import { deliver, deliverEmail } from "@/lib/notifications";
+import { formatPaise } from "@/lib/money";
 import { AppError } from "@/lib/errors";
 import type { Application } from "@/generated/prisma/client";
 
@@ -232,6 +233,12 @@ export async function notifyOfficeOfApplication(
       (outstandingDocuments.length > 0
         ? `Still to be collected in physical copy: ${outstandingDocuments.join(", ")}\n`
         : `Nothing outstanding — every required document was uploaded.\n`) +
+      (application.claimedPaymentReference
+        ? `\nThe applicant reports paying ${formatPaise(application.claimedPaymentPaise ?? 0)} online, ` +
+          `reference ${application.claimedPaymentReference}. NOT VERIFIED — the bank's page reports nothing ` +
+          `back to the system. Check it against the statement, then record it on the Registration fee tab; ` +
+          `until you do, no receipt exists and the admission stays provisional.\n`
+        : `\nNo online payment reported.\n`) +
       `\nThe batch, fee plan and registration fee are still to be set. Open it here:\n` +
       `${appBaseUrl()}/enrollment/${application.id}\n`,
   });

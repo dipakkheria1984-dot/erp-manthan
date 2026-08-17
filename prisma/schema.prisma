@@ -233,7 +233,17 @@ model InstituteConfig {
   /// Publishes the public admission form at /apply. Off by default: turning it
   /// on opens a route that anyone with the address can start an application
   /// through, which is an institute decision rather than a deployment default.
-  onlineAdmissionsEnabled  Boolean @default(false)
+  onlineAdmissionsEnabled Boolean @default(false)
+
+  /// Hosted payment page an applicant is sent to for the registration fee.
+  ///
+  /// A link, not an integration: the bank's page reports nothing back, so the
+  /// applicant returns and types the reference they were given. That is a claim
+  /// and is treated as one — see `Application.claimedPayment*`. Blank hides the
+  /// payment step entirely.
+  registrationPaymentUrl   String?
+  /// Shown beside the link — which account, what reference to quote, and so on.
+  registrationPaymentNote  String?
   /// Applications one address may start per hour. The public form is the only
   /// unauthenticated way into the database, so it is metered.
   onlineAdmissionsPerHour  Int     @default(3)
@@ -598,6 +608,21 @@ model Application {
   /// still the office's act, after the batch, fee plan and registration fee are
   /// set. This is what puts the row on the "awaiting fee assignment" list.
   applicantSubmittedAt DateTime?
+
+  /// What the applicant says they paid on the bank's hosted page, and nothing
+  /// more. The page reports nothing back to us, so this is their word: no
+  /// receipt, no `Payment` row, no effect on `registrationFeePaidPaise` or on
+  /// provisional status until the office checks it against the bank and records
+  /// the collection through the normal registration-fee screen.
+  ///
+  /// Kept apart from the money for exactly that reason — a claim that turns out
+  /// to be wrong must never have moved anything.
+  claimedPaymentReference String?
+  claimedPaymentPaise     Int?
+  claimedPaymentAt        DateTime?
+  /// Set when the office has reconciled the claim, either way, so a checked
+  /// claim stops appearing on the list of things to check.
+  claimedPaymentSettledAt DateTime?
 
   // 1. Student information
   fullName   String

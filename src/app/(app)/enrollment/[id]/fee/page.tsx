@@ -60,6 +60,31 @@ export default async function RegistrationFeePage({ params }: { params: Promise<
         />
       </div>
 
+      {application.claimedPaymentReference ? (
+        <Alert
+          tone={application.claimedPaymentSettledAt ? "success" : "warning"}
+          title={
+            application.claimedPaymentSettledAt
+              ? "Online payment — already checked"
+              : "Online payment reported — not verified"
+          }
+        >
+          The applicant says they paid{" "}
+          <strong>{formatPaise(application.claimedPaymentPaise ?? 0)}</strong> on{" "}
+          {formatDate(application.claimedPaymentAt)} with reference{" "}
+          <span className="font-mono">{application.claimedPaymentReference}</span>.
+          {application.claimedPaymentSettledAt ? null : (
+            <>
+              {" "}
+              The bank&rsquo;s page reports nothing back to this system, so this is their word and nothing more —
+              no receipt exists and nothing has moved. Check it against the bank statement, then record it below
+              like any other collection. Recording it is what issues the receipt and clears the provisional
+              admission.
+            </>
+          )}
+        </Alert>
+      ) : null}
+
       {firstInstallment ? (
         <Alert tone="info">
           Partial payments are accepted — the application can be submitted as soon as the total collected reaches the

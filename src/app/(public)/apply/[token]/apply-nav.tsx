@@ -18,7 +18,8 @@ export function ApplyNav({ token }: { token: string }) {
         { label: "2. Parent / guardian", href: `${base}/guardians` },
         { label: "3. Course", href: `${base}/course` },
         { label: "4. Documents", href: `${base}/documents` },
-        { label: "5. Finish", href: `${base}/finish` },
+        { label: "5. Registration fee", href: `${base}/payment` },
+        { label: "6. Finish", href: `${base}/finish` },
       ]}
     />
   );

@@ -72,7 +72,7 @@ export default async function PortalDocumentsPage({ params }: { params: Promise<
       </Card>
 
       <div className="flex justify-end">
-        <LinkButton href={`/apply/${token}/finish`}>Continue to finish</LinkButton>
+        <LinkButton href={`/apply/${token}/payment`}>Continue to registration fee</LinkButton>
       </div>
     </div>
   );

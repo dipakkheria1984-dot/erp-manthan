@@ -218,6 +218,53 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
                 />
               </Field>
             </FormGrid>
+
+            <div className="mt-6 border-t border-border pt-4">
+              <p className="text-sm font-medium">Registration fee payment link</p>
+              <p className="mt-1 text-sm text-muted">
+                Paste your bank&rsquo;s hosted payment page. Applicants are sent there and asked to type back the
+                reference the bank gives them.
+              </p>
+              <div className="mt-3">
+                <Alert tone="warning" title="This is a link, not a verified integration">
+                  The bank&rsquo;s page reports nothing back to this system, so a reported payment is the
+                  applicant&rsquo;s word: no receipt is issued, no money is recorded, and the admission stays
+                  provisional until your office checks the reference against the bank statement and records the
+                  collection on the application&rsquo;s Registration fee tab. Leave this blank to collect at the
+                  counter only.
+                </Alert>
+              </div>
+              <div className="mt-4">
+                <FormGrid cols={1}>
+                  <Field
+                    label="Payment page address"
+                    htmlFor="registrationPaymentUrl"
+                    hint="Must start with https://"
+                    error={fieldError(state, "registrationPaymentUrl")}
+                  >
+                    <Input
+                      id="registrationPaymentUrl"
+                      name="registrationPaymentUrl"
+                      type="url"
+                      placeholder="https://…"
+                      defaultValue={config.registrationPaymentUrl ?? ""}
+                    />
+                  </Field>
+                  <Field
+                    label="Instructions shown to the applicant"
+                    htmlFor="registrationPaymentNote"
+                    hint="Optional — which reference to quote, what the payment covers."
+                    error={fieldError(state, "registrationPaymentNote")}
+                  >
+                    <Input
+                      id="registrationPaymentNote"
+                      name="registrationPaymentNote"
+                      defaultValue={config.registrationPaymentNote ?? ""}
+                    />
+                  </Field>
+                </FormGrid>
+              </div>
+            </div>
           </Card>
 
           <Card title="Document numbering">
