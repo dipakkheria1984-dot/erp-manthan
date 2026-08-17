@@ -39,6 +39,28 @@ export function currentTuitionRate(batchId: string, db: Db = prisma): Promise<nu
   return tuitionRateAt(batchId, new Date(), db);
 }
 
+/**
+ * What a new admission into this batch must register with — the amount that is
+ * installment 1, and the amount an admission stays provisional until it clears.
+ *
+ * Kept as one pure function because five places need the same answer: the fee
+ * plan, the collection screen, the submission gate, the approval, and the two
+ * halves of the provisional rule. Any of them reading the institute minimum
+ * directly would quietly disagree with the batch a student is actually in.
+ *
+ * A batch with no figure of its own predates this being settable and falls back
+ * to the institute minimum. Where a batch does carry one it may not be below
+ * that minimum — the batch form refuses it — so taking the larger here is a
+ * guard against an older row rather than routine behaviour.
+ */
+export function registrationFeeFor(
+  batch: { registrationFeePaise: number | null },
+  config: { minRegistrationFeePaise: number },
+): number {
+  if (batch.registrationFeePaise === null) return config.minRegistrationFeePaise;
+  return Math.max(batch.registrationFeePaise, config.minRegistrationFeePaise);
+}
+
 export type InstallmentDraft = { seqNo: number; dueDate: Date; amountPaise: number };
 
 /** One row as the installment editors post it. `id` is empty on a new row. */
@@ -141,6 +163,7 @@ export function validateInstallmentPlan({
   minCount,
   maxCount,
   minFirstInstallmentPaise = 0,
+  firstInstallmentPaise,
 }: {
   rows: InstallmentDraft[];
   totalPayablePaise: number;
@@ -148,6 +171,13 @@ export function validateInstallmentPlan({
   minCount: number;
   maxCount: number;
   minFirstInstallmentPaise?: number;
+  /**
+   * The batch's registration fee, where the batch sets one. Installment 1 is
+   * that amount exactly — not a floor — because the two are the same charge
+   * seen from two directions, and an installment 1 larger than the registration
+   * fee would leave an admission confirmed with money still owed on it.
+   */
+  firstInstallmentPaise?: number;
 }): string | null {
   if (rows.length === 0) return "Add at least one installment.";
   if (rows.length < minCount || rows.length > maxCount) {
@@ -171,6 +201,12 @@ export function validateInstallmentPlan({
     return `The installments add up to ${formatPaise(total)} but the fee for this batch is ${formatPaise(
       totalPayablePaise,
     )}.`;
+  }
+
+  if (firstInstallmentPaise !== undefined && rows[0].amountPaise !== firstInstallmentPaise) {
+    return `The first installment must be exactly ${formatPaise(
+      firstInstallmentPaise,
+    )} — this batch's registration fee. Change the registration fee on the batch to alter it.`;
   }
 
   if (rows[0].amountPaise < minFirstInstallmentPaise) {

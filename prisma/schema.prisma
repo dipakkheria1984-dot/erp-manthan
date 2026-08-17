@@ -488,8 +488,20 @@ model Batch {
   completionDate DateTime
   totalSeats     Int
   status         BatchStatus @default(UPCOMING)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+
+  /// What a new admission into this batch pays to register, and therefore what
+  /// installment 1 is — the two are the same amount by definition, and the
+  /// admission stays provisional until it is cleared.
+  ///
+  /// Null means the batch predates this being settable, and the institute-wide
+  /// minimum stands in. Where a value is set it may not fall below that
+  /// minimum, so the institute figure is a floor rather than a default.
+  ///
+  /// Admission only: promotion into a later year raises no registration fee.
+  registrationFeePaise Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   course        Course            @relation(fields: [courseId], references: [id])
   feeHistory    BatchFeeHistory[]

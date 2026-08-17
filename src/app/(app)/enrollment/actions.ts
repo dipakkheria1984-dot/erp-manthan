@@ -10,13 +10,14 @@ import { getConfig } from "@/lib/config";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { fromDateInput, startOfDay } from "@/lib/dates";
-import { tuitionRateAt, validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
+import { registrationFeeFor, tuitionRateAt, validateInstallmentPlan, type InstallmentDraft } from "@/lib/fees";
 import { refreshInstallment } from "@/lib/late-fees";
 import { formatPaise, percentOf, rupeesToPaise } from "@/lib/money";
 import {
   blockingItems,
   feePreview,
   findDuplicates,
+  requiredRegistrationFee,
   settleProvisionalAdmission,
   submissionReadiness,
 } from "@/lib/enrollment";
@@ -432,9 +433,12 @@ export async function saveFeePlanAction(_prev: unknown, formData: FormData): Pro
       completionDate: application.batch.completionDate,
       minCount: config.installmentMin,
       maxCount: config.installmentMax,
-      minFirstInstallmentPaise: Math.min(
+      // Installment 1 is the batch's registration fee exactly. Capped at the
+      // whole fee so a heavily discounted student, whose total can fall below
+      // the registration fee, still gets a schedule that adds up.
+      firstInstallmentPaise: Math.min(
         preview.totalPayablePaise,
-        Math.max(config.minRegistrationFeePaise, application.registrationFeePaidPaise),
+        registrationFeeFor(application.batch, config),
       ),
     });
     if (problem) return fail(problem);
@@ -606,7 +610,7 @@ export async function submitApplicationAction(_prev: unknown, formData: FormData
     if (application.status !== "DRAFT") return fail("This application has already been submitted.");
 
     const config = await getConfig();
-    const readiness = await submissionReadiness(application, config.minRegistrationFeePaise);
+    const readiness = await submissionReadiness(application, await requiredRegistrationFee(application));
     const blocking = blockingItems(readiness);
     if (blocking.length > 0) {
       return fail(`Cannot submit yet — ${blocking.map((item) => item.label.toLowerCase()).join(", ")} still incomplete.`);
@@ -753,12 +757,18 @@ export async function approveApplicationAction(_prev: unknown, formData: FormDat
     }));
 
     const registrationPaid = application.payments.reduce((sum, payment) => sum + payment.amountPaise, 0);
+    // What this batch asks a new admission to register with. Capped at the
+    // whole fee, so a student whose scholarship takes the total below the
+    // registration fee still gets a schedule that adds up — and clearing that
+    // single installment confirms them just the same.
+    const requiredRegistration = Math.min(totalPayable, registrationFeeFor(application.batch, config));
     const problem = validateInstallmentPlan({
       rows: plan,
       totalPayablePaise: totalPayable,
       completionDate: application.batch.completionDate,
       minCount: config.installmentMin,
       maxCount: config.installmentMax,
+      firstInstallmentPaise: requiredRegistration,
       minFirstInstallmentPaise: registrationPaid,
     });
     if (problem) {
@@ -846,6 +856,12 @@ export async function approveApplicationAction(_prev: unknown, formData: FormDat
           decisionReason: reason,
           lfNo,
           studentCode,
+          // A new admission is provisional until the batch's registration fee
+          // is cleared, and confirmed the moment it is. The Registrar no longer
+          // has to remember to set this; the manual toggle stays for the
+          // exceptions it was built for. `settleProvisionalAdmission` is the
+          // other half — it lifts this on its own when the money lands.
+          isProvisional: registrationPaid < requiredRegistration,
         },
       });
 

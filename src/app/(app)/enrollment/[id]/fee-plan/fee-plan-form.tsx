@@ -30,7 +30,7 @@ export function FeePlanForm({
   initialRows,
   breakdown,
   registrationPaidPaise,
-  minFirstInstallmentPaise,
+  firstInstallmentPaise,
   completionDate,
   installmentMin,
   installmentMax,
@@ -39,14 +39,21 @@ export function FeePlanForm({
   initialRows: PlanRow[];
   breakdown: FeeBreakdown;
   registrationPaidPaise: number;
-  minFirstInstallmentPaise: number;
+  /** The batch's registration fee. Installment 1 is this exactly, so it is not editable. */
+  firstInstallmentPaise: number;
   completionDate: string;
   installmentMin: number;
   installmentMax: number;
 }) {
   const totalPayablePaise = breakdown.totalPayablePaise;
+  const firstAmount = paiseToRupees(firstInstallmentPaise).toFixed(2);
   const [rows, setRows] = useState<PlanRow[]>(
-    initialRows.length > 0 ? initialRows : [{ dueDate: toDateInput(new Date()), amount: "" }],
+    initialRows.length > 0
+      ? // An existing plan drawn up before the batch carried a registration fee
+        // can disagree with it; the row is corrected on load rather than left to
+        // fail validation on save.
+        initialRows.map((row, i) => (i === 0 ? { ...row, amount: firstAmount } : row))
+      : [{ dueDate: toDateInput(new Date()), amount: firstAmount }],
   );
   const [count, setCount] = useState(String(Math.min(4, installmentMax)));
   const [firstDue, setFirstDue] = useState(toDateInput(new Date()));
@@ -75,7 +82,9 @@ export function FeePlanForm({
     if (!Number.isFinite(n) || n < 1) return;
     const start = fromDateInput(firstDue);
     if (Number.isNaN(start.getTime())) return;
-    const amounts = splitPaise(totalPayablePaise, n);
+    // Installment 1 is fixed, so only the remainder is spread over the rest.
+    const rest = n > 1 ? splitPaise(totalPayablePaise - firstInstallmentPaise, n - 1) : [];
+    const amounts = n > 1 ? [firstInstallmentPaise, ...rest] : [totalPayablePaise];
     setRows(
       amounts.map((paise, i) => {
         const due = addMonths(start, i);
@@ -203,8 +212,11 @@ export function FeePlanForm({
                     inputMode="decimal"
                     value={row.amount}
                     placeholder="0.00"
+                    readOnly={index === 0}
                     onChange={(e) => setRow(index, { amount: e.target.value })}
                     aria-label={`Installment ${index + 1} amount`}
+                    className={index === 0 ? "bg-background text-muted" : undefined}
+                    title={index === 0 ? "Fixed by the batch's registration fee" : undefined}
                   />
                 </Td>
                 <Td>
@@ -219,12 +231,10 @@ export function FeePlanForm({
           </tbody>
         </TableWrap>
 
-        {minFirstInstallmentPaise > 0 ? (
-          <p className="mt-3 text-xs text-muted">
-            Installment 1 must be at least {formatPaise(minFirstInstallmentPaise)} — the registration fee collected at
-            enrollment is applied to it.
-          </p>
-        ) : null}
+        <p className="mt-3 text-xs text-muted">
+          Installment 1 is fixed at {formatPaise(firstInstallmentPaise)} — this batch&rsquo;s registration fee. The
+          admission stays provisional until it is cleared. Change it on the batch, not here.
+        </p>
 
         {difference !== 0 ? (
           <div className="mt-4">

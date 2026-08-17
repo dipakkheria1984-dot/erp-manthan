@@ -2,7 +2,7 @@ import "server-only";
 import { prisma, type Db } from "@/lib/db";
 import { getConfig } from "@/lib/config";
 import { recordAudit, recordAuditTx } from "@/lib/audit";
-import { tuitionRateAt } from "@/lib/fees";
+import { registrationFeeFor, tuitionRateAt } from "@/lib/fees";
 import { refreshInstallment, refreshInstallmentsBulk } from "@/lib/late-fees";
 import { formatPaise, percentOf } from "@/lib/money";
 import type {
@@ -43,8 +43,41 @@ export function blockingItems(readiness: ReadinessItem[]): ReadinessItem[] {
   return readiness.filter((item) => !item.done && !item.optional);
 }
 
+/**
+ * How much this application must have registered with before it can be
+ * submitted — the batch's registration fee, or the institute floor for a batch
+ * that predates the setting. Capped at the whole fee, so a scholarship that
+ * takes the total below the registration fee cannot demand more than is owed.
+ */
+export async function requiredRegistrationFee(
+  application: Pick<ApplicationWithRelations, "batchId"> & {
+    batch?: { registrationFeePaise: number | null } | null;
+  },
+  db: Db = prisma,
+): Promise<number> {
+  const config = await getConfig(db);
+  const batch =
+    application.batch ??
+    (application.batchId
+      ? await db.batch.findUnique({
+          where: { id: application.batchId },
+          select: { registrationFeePaise: true },
+        })
+      : null);
+  const required = batch ? registrationFeeFor(batch, config) : config.minRegistrationFeePaise;
+
+  const preview = await feePreview(application as ApplicationWithRelations, db);
+  return preview ? Math.min(required, preview.totalPayablePaise) : required;
+}
+
 export async function submissionReadiness(
   application: ApplicationWithRelations,
+  /**
+   * The registration fee this application must clear. Callers pass it because
+   * several of them already have it on screen; `requiredRegistrationFee` is
+   * where it comes from, and nothing should be reading the institute minimum
+   * directly any more.
+   */
   minRegistrationFeePaise: number,
   db: Db = prisma,
 ): Promise<ReadinessItem[]> {
@@ -286,6 +319,7 @@ export async function settleProvisionalAdmission(
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
     include: {
+      batch: true,
       student: {
         include: {
           feeAssignments: {
@@ -300,7 +334,12 @@ export async function settleProvisionalAdmission(
   if (!application || !application.isProvisional) return { cleared: false };
 
   const config = await getConfig();
-  if (application.registrationFeePaidPaise < config.minRegistrationFeePaise) return { cleared: false };
+  // The batch the student is actually in decides the amount, not the
+  // institute-wide floor — see `registrationFeeFor`.
+  const required = application.batch
+    ? registrationFeeFor(application.batch, config)
+    : config.minRegistrationFeePaise;
+  if (application.registrationFeePaidPaise < required) return { cleared: false };
 
   const firstInstallment = application.student?.feeAssignments[0]?.installments[0];
   if (firstInstallment && firstInstallment.status !== "PAID" && firstInstallment.status !== "WAIVED") {
@@ -323,7 +362,7 @@ export async function settleProvisionalAdmission(
     summary: `Provisional admission cleared automatically for ${application.fullName} — registration fee settled in full`,
     metadata: {
       registrationFeePaidPaise: application.registrationFeePaidPaise,
-      minRegistrationFeePaise: config.minRegistrationFeePaise,
+      requiredRegistrationFeePaise: required,
       firstInstallmentStatus: firstInstallment?.status ?? null,
     },
   });
@@ -357,6 +396,7 @@ export async function reinstateProvisionalAdmission(
   const application = await db.application.findUnique({
     where: { id: applicationId },
     include: {
+      batch: true,
       student: {
         include: {
           feeAssignments: {
@@ -371,8 +411,12 @@ export async function reinstateProvisionalAdmission(
   if (!application || application.isProvisional) return { reinstated: false };
 
   const config = await getConfig(db);
+  // The same amount the clearing half uses, read the other way.
+  const required = application.batch
+    ? registrationFeeFor(application.batch, config)
+    : config.minRegistrationFeePaise;
   const firstInstallment = application.student?.feeAssignments[0]?.installments[0];
-  const registrationSettled = application.registrationFeePaidPaise >= config.minRegistrationFeePaise;
+  const registrationSettled = application.registrationFeePaidPaise >= required;
   const firstInstallmentSettled =
     !firstInstallment || firstInstallment.status === "PAID" || firstInstallment.status === "WAIVED";
   if (registrationSettled && firstInstallmentSettled) return { reinstated: false };
@@ -393,7 +437,7 @@ export async function reinstateProvisionalAdmission(
       `registration fee no longer settled after a receipt was cancelled`,
     metadata: {
       registrationFeePaidPaise: application.registrationFeePaidPaise,
-      minRegistrationFeePaise: config.minRegistrationFeePaise,
+      requiredRegistrationFeePaise: required,
       firstInstallmentStatus: firstInstallment?.status ?? null,
     },
   });

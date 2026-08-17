@@ -17,10 +17,23 @@ export type BatchView = {
   completionDate: string;
   totalSeats: number;
   currentFeePaise: number;
+  /** Null on a batch created before this was settable — the field offers the institute minimum. */
+  registrationFeePaise: number | null;
   status: "UPCOMING" | "ONGOING" | "COMPLETED" | "DISCONTINUED";
 };
 
-function BatchFields({ batch, courses, state }: { batch?: BatchView; courses: Option[]; state: FormState }) {
+function BatchFields({
+  batch,
+  courses,
+  state,
+  minRegistrationFeePaise,
+}: {
+  batch?: BatchView;
+  courses: Option[];
+  state: FormState;
+  /** The institute-wide floor, offered as the starting value. */
+  minRegistrationFeePaise: number;
+}) {
   const key = batch?.id ?? "new";
   return (
     <div className="space-y-4">
@@ -93,6 +106,25 @@ function BatchFields({ batch, courses, state }: { batch?: BatchView; courses: Op
             required
           />
         </Field>
+        <Field
+          label="Registration fee (₹)"
+          htmlFor={`reg-${key}`}
+          required
+          hint="What a new admission pays to register. Installment 1 is this amount, and the admission stays provisional until it is cleared."
+          error={fieldError(state, "registrationFeePaise")}
+        >
+          <Input
+            id={`reg-${key}`}
+            name="registrationFeePaise"
+            inputMode="decimal"
+            defaultValue={
+              batch?.registrationFeePaise != null
+                ? String(paiseToRupees(batch.registrationFeePaise))
+                : String(paiseToRupees(minRegistrationFeePaise))
+            }
+            required
+          />
+        </Field>
       </FormGrid>
       {batch ? (
         <Alert tone="info">
@@ -104,7 +136,13 @@ function BatchFields({ batch, courses, state }: { batch?: BatchView; courses: Op
   );
 }
 
-export function BatchEditor({ courses }: { courses: Option[] }) {
+export function BatchEditor({
+  courses,
+  minRegistrationFeePaise,
+}: {
+  courses: Option[];
+  minRegistrationFeePaise: number;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -121,7 +159,7 @@ export function BatchEditor({ courses }: { courses: Option[] }) {
         <ActionForm action={saveBatchAction} onSuccess={() => setOpen(false)}>
           {(state) => (
             <>
-              <BatchFields courses={courses} state={state} />
+              <BatchFields courses={courses} state={state} minRegistrationFeePaise={minRegistrationFeePaise} />
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
                   Cancel
@@ -140,10 +178,12 @@ export function BatchRowActions({
   batch,
   courses,
   canDelete,
+  minRegistrationFeePaise,
 }: {
   batch: BatchView;
   courses: Option[];
   canDelete: boolean;
+  minRegistrationFeePaise: number;
 }) {
   const [editing, setEditing] = useState(false);
   return (
@@ -164,7 +204,12 @@ export function BatchRowActions({
         <ActionForm action={saveBatchAction} onSuccess={() => setEditing(false)}>
           {(state) => (
             <>
-              <BatchFields batch={batch} courses={courses} state={state} />
+              <BatchFields
+                batch={batch}
+                courses={courses}
+                state={state}
+                minRegistrationFeePaise={minRegistrationFeePaise}
+              />
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="secondary" onClick={() => setEditing(false)}>
                   Cancel

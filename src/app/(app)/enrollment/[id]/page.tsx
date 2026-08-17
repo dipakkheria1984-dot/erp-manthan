@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { getConfig, getInstitute } from "@/lib/config";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
-import { blockingItems, feePreview, submissionReadiness, statusLabel } from "@/lib/enrollment";
+import { blockingItems, feePreview, submissionReadiness, statusLabel, requiredRegistrationFee } from "@/lib/enrollment";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
 import { Alert, Card, DescriptionList, LinkButton, buttonClass } from "@/components/ui";
@@ -39,7 +39,7 @@ export default async function ApplicationOverviewPage({ params }: { params: Prom
   if (!application) notFound();
 
   const institute = await getInstitute().catch(() => null);
-  const readiness = await submissionReadiness(application, config.minRegistrationFeePaise);
+  const readiness = await submissionReadiness(application, await requiredRegistrationFee(application));
   const outstanding = blockingItems(readiness);
   const canCreate = hasPermission(actor.permissions, PERMISSIONS.ENROLLMENT_CREATE);
   const canApprove = hasPermission(actor.permissions, PERMISSIONS.ENROLLMENT_APPROVE);

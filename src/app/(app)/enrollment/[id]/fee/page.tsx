@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { getConfig } from "@/lib/config";
+import { requiredRegistrationFee } from "@/lib/enrollment";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { formatDate } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
@@ -36,7 +37,8 @@ export default async function RegistrationFeePage({ params }: { params: Promise<
     hasPermission(actor.permissions, PERMISSIONS.ENROLLMENT_CREATE);
 
   const paid = application.registrationFeePaidPaise;
-  const required = config.minRegistrationFeePaise;
+  // The batch's registration fee, not the institute floor.
+  const required = await requiredRegistrationFee(application);
   const shortfall = Math.max(0, required - paid);
   const firstInstallment = application.feePlan[0];
   const roomLeft = firstInstallment ? Math.max(0, firstInstallment.amountPaise - paid) : 0;
@@ -44,7 +46,11 @@ export default async function RegistrationFeePage({ params }: { params: Promise<
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatTile label="Minimum required" value={formatPaise(required)} hint="Gates Draft → Submitted" />
+        <StatTile
+          label="Registration fee"
+          value={formatPaise(required)}
+          hint="Set on the batch · gates Draft → Submitted"
+        />
         <StatTile label="Collected" value={formatPaise(paid)} tone={shortfall === 0 ? "success" : "default"} />
         <StatTile
           label="Shortfall"

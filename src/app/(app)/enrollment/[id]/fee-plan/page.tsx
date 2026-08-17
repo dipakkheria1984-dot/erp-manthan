@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { getConfig } from "@/lib/config";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
-import { feePreview } from "@/lib/enrollment";
+import { feePreview, requiredRegistrationFee } from "@/lib/enrollment";
 import { formatDate, toDateInput } from "@/lib/dates";
 import { formatPaise, paiseToRupees } from "@/lib/money";
 import { Alert, Badge, Card, LinkButton, TableWrap, Td, Th, Tr } from "@/components/ui";
@@ -98,10 +98,7 @@ export default async function FeePlanPage({ params }: { params: Promise<{ id: st
             totalPayablePaise: preview.totalPayablePaise,
           }}
           registrationPaidPaise={preview.registrationPaidPaise}
-          minFirstInstallmentPaise={Math.min(
-            preview.totalPayablePaise,
-            Math.max(config.minRegistrationFeePaise, preview.registrationPaidPaise),
-          )}
+          firstInstallmentPaise={await requiredRegistrationFee(application)}
           completionDate={application.batch.completionDate.toISOString()}
           installmentMin={config.installmentMin}
           installmentMax={config.installmentMax}

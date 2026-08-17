@@ -4,6 +4,8 @@ import { requirePermission } from "@/lib/auth";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { formatDate } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
+import { getConfig } from "@/lib/config";
+import { registrationFeeFor } from "@/lib/fees";
 import { Badge, Card, DescriptionList, PageHeader, StatTile, TableWrap, Td, Th, Tr } from "@/components/ui";
 import { BatchRowActions } from "../batch-editor";
 import { FeeRevisionForm, SemesterRowActions } from "./batch-detail-forms";
@@ -26,12 +28,14 @@ export default async function BatchDetailPage({ params }: { params: Promise<{ id
   });
   if (!batch) notFound();
 
-  const [courses, academicYears] = await Promise.all([
+  const [courses, academicYears, config] = await Promise.all([
     prisma.course.findMany({ where: { status: { not: "DISCONTINUED" } }, orderBy: { name: "asc" } }),
     prisma.academicYear.findMany({ orderBy: { startDate: "desc" } }),
+    getConfig(),
   ]);
 
   const currentFee = batch.feeHistory[0]?.tuitionFeePaise ?? 0;
+  const registrationFee = registrationFeeFor(batch, config);
   const seatsLeft = batch.totalSeats - batch._count.students;
 
   return (
@@ -51,10 +55,12 @@ export default async function BatchDetailPage({ params }: { params: Promise<{ id
                 completionDate: batch.completionDate.toISOString(),
                 totalSeats: batch.totalSeats,
                 currentFeePaise: currentFee,
+                registrationFeePaise: batch.registrationFeePaise,
                 status: batch.status,
               }}
               courses={courses.map((c) => ({ id: c.id, name: `${c.code} — ${c.name}` }))}
               canDelete={batch._count.students === 0 && batch._count.applications === 0}
+              minRegistrationFeePaise={config.minRegistrationFeePaise}
             />
           ) : null
         }
@@ -62,6 +68,15 @@ export default async function BatchDetailPage({ params }: { params: Promise<{ id
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Current preset fee" value={formatPaise(currentFee)} hint="Tuition, before scholarship" />
+        <StatTile
+          label="Registration fee"
+          value={formatPaise(registrationFee)}
+          hint={
+            batch.registrationFeePaise === null
+              ? "Not set — the institute minimum applies"
+              : "Installment 1, and provisional until cleared"
+          }
+        />
         <StatTile
           label="Seats"
           value={`${batch._count.students}/${batch.totalSeats}`}

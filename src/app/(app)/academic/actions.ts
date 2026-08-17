@@ -8,6 +8,8 @@ import { recordAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { startOfDay } from "@/lib/dates";
+import { getConfig } from "@/lib/config";
+import { formatPaise } from "@/lib/money";
 import { semesterLayout } from "@/lib/academic";
 import { reflowInstallmentsForBatch } from "@/lib/fees";
 import {
@@ -205,6 +207,7 @@ const batchSchema = z
     completionDate: dateInput("Completion date"),
     totalSeats: intInput("Total seats", { min: 1, max: 10000 }),
     tuitionFeePaise: rupeeAmount("Preset batch fee", { min: 0 }),
+    registrationFeePaise: rupeeAmount("Registration fee", { min: 0 }),
     status: z.enum(["UPCOMING", "ONGOING", "COMPLETED", "DISCONTINUED"]),
   })
   .refine((data) => data.completionDate > data.startDate, {
@@ -219,6 +222,31 @@ export async function saveBatchAction(_prev: unknown, formData: FormData): Promi
     if (!parsed.success) return fail("Please correct the highlighted fields.", fieldErrorsOf(parsed.error));
 
     const { id, tuitionFeePaise, ...data } = parsed.data;
+
+    // The institute-wide figure is a floor, not a default: a batch may charge
+    // more to register but never less, so one setting still governs the whole
+    // institute's minimum however many batches exist.
+    const config = await getConfig();
+    if (data.registrationFeePaise < config.minRegistrationFeePaise) {
+      return fail(
+        `The registration fee cannot be below the institute minimum of ${formatPaise(
+          config.minRegistrationFeePaise,
+        )}.`,
+        { registrationFeePaise: [`Minimum ${formatPaise(config.minRegistrationFeePaise)}.`] },
+      );
+    }
+    // Installment 1 is this amount, and the plan has to add up to the batch's
+    // fee — so a registration fee above the tuition can never be scheduled.
+    // Caught here, where it is the batch's setting, rather than at the fee plan
+    // where it would read as the Registrar's mistake.
+    if (data.registrationFeePaise > tuitionFeePaise) {
+      return fail(
+        `The registration fee cannot exceed the batch fee of ${formatPaise(
+          tuitionFeePaise,
+        )} — installment 1 is the registration fee.`,
+        { registrationFeePaise: [`Maximum ${formatPaise(tuitionFeePaise)}.`] },
+      );
+    }
 
     const clash = await prisma.batch.findFirst({ where: { code: data.code, ...(id ? { NOT: { id } } : {}) } });
     if (clash) return fail("That code is already used.", { code: ["Already in use."] });

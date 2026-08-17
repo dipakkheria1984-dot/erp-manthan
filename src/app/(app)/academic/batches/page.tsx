@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { formatDate } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
+import { getConfig } from "@/lib/config";
 import { Alert, Badge, Card, PageHeader, TableWrap, Td, Th, Tr } from "@/components/ui";
 import { BatchEditor } from "./batch-editor";
 
@@ -15,7 +16,7 @@ export default async function BatchesPage() {
   const actor = await requirePermission(PERMISSIONS.ACADEMIC_VIEW, PERMISSIONS.ACADEMIC_MANAGE);
   const canManage = hasPermission(actor.permissions, PERMISSIONS.ACADEMIC_MANAGE);
 
-  const [batches, courses] = await Promise.all([
+  const [batches, courses, config] = await Promise.all([
     prisma.batch.findMany({
       include: {
         course: { include: { department: true } },
@@ -26,6 +27,7 @@ export default async function BatchesPage() {
     }),
     // Discontinued courses cannot receive new batches (spec 5.2).
     prisma.course.findMany({ where: { status: { not: "DISCONTINUED" } }, orderBy: { name: "asc" } }),
+    getConfig(),
   ]);
 
   const courseOptions = courses.map((c) => ({ id: c.id, name: `${c.code} — ${c.name}` }));
@@ -35,7 +37,11 @@ export default async function BatchesPage() {
       <PageHeader
         title="Batches"
         description="A batch is a fixed cohort — the same students move together through every semester. Enrollment is blocked once capacity is reached; there is no waitlist."
-        actions={canManage && courseOptions.length > 0 ? <BatchEditor courses={courseOptions} /> : null}
+        actions={
+          canManage && courseOptions.length > 0 ? (
+            <BatchEditor courses={courseOptions} minRegistrationFeePaise={config.minRegistrationFeePaise} />
+          ) : null
+        }
       />
 
       {courseOptions.length === 0 ? (
