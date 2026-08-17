@@ -26,6 +26,12 @@ import { runReminderPass } from "@/lib/reminders";
  */
 export const maxDuration = 60;
 
+/**
+ * The same ceiling handed to the pass, so it can stop and record where it got
+ * to instead of being killed mid-message with nothing written down.
+ */
+const BUDGET_MS = maxDuration * 1000;
+
 /** Constant-time compare, so a wrong secret leaks nothing through timing. */
 function secretMatches(provided: string | null, expected: string): boolean {
   if (!provided || !expected) return false;
@@ -37,7 +43,7 @@ function secretMatches(provided: string | null, expected: string): boolean {
 
 async function runPass() {
   try {
-    const result = await runReminderPass();
+    const result = await runReminderPass(new Date(), BUDGET_MS);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("[job:reminders]", error);

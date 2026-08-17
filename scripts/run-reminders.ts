@@ -31,8 +31,15 @@ async function main() {
   }
 
   console.log(
-    `Reminder pass complete — scanned ${body.scanned}, pre-due ${body.preDueSent}, overdue ${body.overdueSent}, failures ${body.failures}.`,
+    `Reminder pass ${body.completed ? "complete" : "incomplete"} — scanned ${body.scanned}, ` +
+      `pre-due ${body.preDueSent}, overdue ${body.overdueSent}, failures ${body.failures}.`,
   );
+  if (Number(body.skippedForTime) > 0) {
+    console.warn(
+      `${body.skippedForTime} reminder(s) were not attempted — the pass ran out of time. ` +
+        `The next pass picks them up; run it again now to send them sooner.`,
+    );
+  }
 }
 
 main().catch((error) => {

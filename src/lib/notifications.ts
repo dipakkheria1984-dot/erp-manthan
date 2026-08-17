@@ -4,7 +4,12 @@ import { prisma } from "@/lib/db";
 import { getCommunicationConfig, getInstitute } from "@/lib/config";
 import { formatPaise } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
-import { emailProviderFor, whatsappProviderFor, type Attachment } from "@/lib/notification-providers";
+import {
+  emailProviderFor,
+  whatsappProviderFor,
+  type Attachment,
+  type NotificationProvider,
+} from "@/lib/notification-providers";
 import type { NotificationKind } from "@/generated/prisma/client";
 
 /**
@@ -20,6 +25,21 @@ import type { NotificationKind } from "@/generated/prisma/client";
 
 type Recipient = { email: string | null; phone: string | null };
 
+/**
+ * The two providers a reminder fans out to, resolved once.
+ *
+ * A one-off notification can let `deliver` look them up for itself. The nightly
+ * reminder pass sends hundreds in a row, and re-reading the communication
+ * configuration for each one is a round trip per message that buys nothing —
+ * the settings cannot change mid-pass.
+ */
+export type Channels = { email: NotificationProvider; whatsapp: NotificationProvider };
+
+export async function resolveChannels(): Promise<Channels> {
+  const config = await getCommunicationConfig();
+  return { email: emailProviderFor(config), whatsapp: whatsappProviderFor(config) };
+}
+
 type DeliverInput = {
   kind: NotificationKind;
   recipient: Recipient;
@@ -28,12 +48,12 @@ type DeliverInput = {
   studentId?: string;
   applicationId?: string;
   installmentId?: string;
+  /** Pre-resolved providers. Looked up per call when absent. */
+  channels?: Channels;
 };
 
 export async function deliver(input: DeliverInput): Promise<{ sent: number; failed: number }> {
-  const config = await getCommunicationConfig();
-  const email = emailProviderFor(config);
-  const whatsapp = whatsappProviderFor(config);
+  const { email, whatsapp } = input.channels ?? (await resolveChannels());
   const groupKey = randomUUID();
 
   const targets = [
@@ -238,35 +258,48 @@ export async function queueWelcomeNotification(studentId: string): Promise<void>
 /* Fee reminders (spec 3.3)                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Everything a reminder needs about who it is for.
+ *
+ * Handed in by the caller rather than looked up here. The pass has already
+ * loaded every one of these rows to work out who owes what, and re-reading them
+ * one installment at a time was a round trip per reminder on a job that has a
+ * fixed number of seconds to reach every student.
+ */
+export type FeeReminderTarget = {
+  installmentId: string;
+  seqNo: number;
+  dueDate: Date;
+  student: {
+    id: string;
+    fullName: string;
+    studentCode: string;
+    email: string | null;
+    phone: string | null;
+    /** Primary guardian, used when the student has no contact of their own. */
+    guardian: { email: string | null; phone: string | null } | null;
+  };
+};
+
 export async function sendFeeReminder({
-  installmentId,
+  target,
   kind,
   outstandingPaise,
   lateFeePaise,
-  dueDate,
+  instituteName,
+  channels,
 }: {
-  installmentId: string;
+  target: FeeReminderTarget;
   kind: "FEE_PRE_DUE" | "FEE_OVERDUE";
   outstandingPaise: number;
   lateFeePaise: number;
-  dueDate: Date;
+  /** Resolved once by the caller; falls back to a lookup for one-off sends. */
+  instituteName?: string;
+  channels?: Channels;
 }): Promise<{ sent: number; failed: number }> {
-  const installment = await prisma.installment.findUnique({
-    where: { id: installmentId },
-    include: {
-      feeAssignment: {
-        include: {
-          student: { include: { application: { include: { guardians: { where: { isPrimary: true }, take: 1 } } } } },
-        },
-      },
-    },
-  });
-  if (!installment) return { sent: 0, failed: 0 };
-
-  const student = installment.feeAssignment.student;
-  const guardian = student.application.guardians[0];
-  const institute = await getInstitute().catch(() => null);
-  const instituteName = institute?.name ?? "the institute";
+  const { student, dueDate, seqNo, installmentId } = target;
+  const guardian = student.guardian;
+  const name = instituteName ?? (await getInstitute().catch(() => null))?.name ?? "the institute";
 
   const isPreDue = kind === "FEE_PRE_DUE";
   const subject = isPreDue
@@ -276,23 +309,27 @@ export async function sendFeeReminder({
   const body =
     `Dear ${student.fullName},\n\n` +
     (isPreDue
-      ? `This is a reminder that installment ${installment.seqNo} is due on ${formatDate(dueDate)}.\n`
-      : `Installment ${installment.seqNo} was due on ${formatDate(dueDate)} and is still unpaid.\n`) +
+      ? `This is a reminder that installment ${seqNo} is due on ${formatDate(dueDate)}.\n`
+      : `Installment ${seqNo} was due on ${formatDate(dueDate)} and is still unpaid.\n`) +
     `Outstanding balance: ${formatPaise(outstandingPaise)}\n` +
     (lateFeePaise > 0 ? `Late fee accrued: ${formatPaise(lateFeePaise)}\n` : "") +
     `Total payable: ${formatPaise(outstandingPaise + lateFeePaise)}\n\n` +
     `Please pay at the accounts office to avoid further late fees.` +
-    signOff(instituteName);
+    signOff(name);
 
   return deliver({
     kind,
     installmentId,
     studentId: student.id,
+    // An empty string is a contact nobody can be reached on, so it falls through
+    // to the guardian exactly as a missing one does. `??` alone would keep it
+    // and quietly address the reminder to nowhere.
     recipient: {
-      email: student.email ?? guardian?.email ?? null,
-      phone: student.phone ?? guardian?.phone ?? null,
+      email: student.email || guardian?.email || null,
+      phone: student.phone || guardian?.phone || null,
     },
     subject,
     body,
+    channels,
   });
 }

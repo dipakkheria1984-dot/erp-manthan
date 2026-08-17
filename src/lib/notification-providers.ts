@@ -75,6 +75,46 @@ export function smtpSettingsFor(config: CommunicationConfig) {
       };
 }
 
+/**
+ * The live transport, kept open between messages.
+ *
+ * A transport used to be built inside every `send`, which meant a TCP connect,
+ * a TLS handshake and an SMTP AUTH round trip per message — one to three
+ * seconds each against Gmail. The nightly reminder pass sends one per student
+ * with dues, so on any real register it spent its whole 60s function budget on
+ * handshakes and was killed part-way through, and every student after the
+ * cut-off silently got nothing. Pooled, the pass opens a few connections and
+ * reuses them for every message.
+ *
+ * Only one configuration is ever in play, so the cache holds a single entry.
+ * The key covers everything that changes the connection: editing the SMTP
+ * settings closes this transport and builds a new one, rather than carrying on
+ * authenticated as the previous user.
+ */
+let pooled: { key: string; transport: nodemailer.Transporter } | null = null;
+
+function transportFor(settings: ReturnType<typeof smtpSettingsFor>): nodemailer.Transporter {
+  const key = JSON.stringify([settings.host, settings.port, settings.secure, settings.user, settings.pass]);
+  if (pooled?.key === key) return pooled.transport;
+
+  pooled?.transport.close();
+  const transport = nodemailer.createTransport({
+    host: settings.host ?? undefined,
+    port: settings.port ?? undefined,
+    secure: settings.secure,
+    auth: settings.user ? { user: settings.user, pass: settings.pass ?? "" } : undefined,
+    pool: true,
+    maxConnections: 3,
+    // One unresponsive connection must not swallow the pass's whole budget and
+    // strand the students behind it — fail that message and move on.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  });
+  pooled = { key, transport };
+  return transport;
+}
+
 class SmtpProvider implements NotificationProvider {
   constructor(
     readonly name: string,
@@ -91,12 +131,7 @@ class SmtpProvider implements NotificationProvider {
     }
 
     try {
-      const transport = nodemailer.createTransport({
-        host: settings.host,
-        port: settings.port,
-        secure: settings.secure,
-        auth: settings.user ? { user: settings.user, pass: settings.pass ?? "" } : undefined,
-      });
+      const transport = transportFor(settings);
 
       // Gmail rewrites the From header to the authenticated account anyway, so
       // fall back to it rather than sending a header Gmail will silently replace.
