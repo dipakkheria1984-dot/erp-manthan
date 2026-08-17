@@ -21,6 +21,7 @@ import {
   applyFontFor,
   paletteOf,
   type PdfDoc,
+  type TableColumn,
 } from "@/lib/pdf";
 import { resolvePrintStyle } from "@/lib/print-theme";
 import {
@@ -87,6 +88,104 @@ export type YearPlan = {
     status: string;
   }[];
 };
+
+/**
+ * Whether a year's exam or activity fee is a real figure or simply not set yet.
+ *
+ * Neither head is rate-locked, so for a year nobody has been promoted into they
+ * are read from the semester rows — and those carry zero until the institute
+ * fixes that year's value. Printing that zero told a family the fee was nil
+ * when it was only undecided, which is the confusion this answers. A year whose
+ * assignments exist is authoritative even at zero; so is a projection that
+ * already has a value.
+ */
+function feeIsDecided(year: Pick<YearPlan, "confirmed" | "yearNumber">, headPaise: number): boolean {
+  // Year 1 is the year being enrolled into. Its fees are part of the admission
+  // just agreed, so whatever it says is the real figure — a zero there means
+  // the head is not charged, not that nobody has decided it. Imported records
+  // can leave even Year 1 without matching assignments, which is why this is
+  // stated by year number rather than inferred from `confirmed`.
+  if (year.yearNumber <= 1) return true;
+  return year.confirmed || headPaise > 0;
+}
+
+/** What an undecided head prints instead of an amount. */
+const UNDECIDED = "To be decided later";
+
+/**
+ * Exam and Activity are wider than their figures need because they now carry
+ * "To be decided later"; the width is borrowed from their neighbours so the
+ * table still fits the page's 515pt of usable width.
+ */
+export const YEAR_FEE_COLUMNS: TableColumn[] = [
+  { header: "Year", width: 34 },
+  { header: "Sem.", width: 42 },
+  { header: "Tuition", width: 74, align: "right" },
+  { header: "Scholarship", width: 76, align: "right" },
+  { header: "Exam", width: 86, align: "right" },
+  { header: "Activity", width: 86, align: "right" },
+  { header: "Year total", width: 112, align: "right" },
+];
+
+/**
+ * The year-wise fee table's cells, split out from the drawing so what a family
+ * reads can be checked without rendering a PDF and trying to read the glyphs
+ * back out of it.
+ */
+export function yearFeeTable(years: YearPlan[]): { rows: string[][]; anyPartial: boolean } {
+  const totals = years.reduce(
+    (sum, year) => ({
+      tuition: sum.tuition + year.tuitionPaise,
+      scholarship: sum.scholarship + year.scholarshipPaise,
+      exam: sum.exam + year.examFeePaise,
+      activity: sum.activity + year.activityFeePaise,
+      total: sum.total + year.totalPaise,
+    }),
+    { tuition: 0, scholarship: 0, exam: 0, activity: 0, total: 0 },
+  );
+
+  // A year total missing an undecided head is not the whole figure, and printing
+  // it plainly would understate the year exactly as the zero did. The "+" says
+  // more is to come; the footnote under the table says what.
+  const yearIsPartial = (year: YearPlan) =>
+    !feeIsDecided(year, year.examFeePaise) || !feeIsDecided(year, year.activityFeePaise);
+  const anyPartial = years.some(yearIsPartial);
+
+  const examUndecided = years.some((year) => !feeIsDecided(year, year.examFeePaise));
+  const activityUndecided = years.some((year) => !feeIsDecided(year, year.activityFeePaise));
+
+  /** A column total covering only the years whose figure is settled. */
+  const partialTotal = (amount: number, undecidedSomewhere: boolean) => {
+    if (!undecidedSomewhere) return formatPaisePdf(amount);
+    // A zero here means no year has a settled figure, so there is no subtotal
+    // worth printing — say the same thing the rows above it say.
+    return amount > 0 ? `${formatPaisePdf(amount)} +` : UNDECIDED;
+  };
+
+  return {
+    anyPartial,
+    rows: [
+      ...years.map((year) => [
+        `${year.yearNumber}${year.confirmed ? "" : " *"}`,
+        year.semesterNumbers.join(", "),
+        formatPaisePdf(year.tuitionPaise),
+        year.scholarshipPaise > 0 ? `− ${formatPaisePdf(year.scholarshipPaise)}` : "—",
+        feeIsDecided(year, year.examFeePaise) ? formatPaisePdf(year.examFeePaise) : UNDECIDED,
+        feeIsDecided(year, year.activityFeePaise) ? formatPaisePdf(year.activityFeePaise) : UNDECIDED,
+        yearIsPartial(year) ? `${formatPaisePdf(year.totalPaise)} +` : formatPaisePdf(year.totalPaise),
+      ]),
+      [
+        "All",
+        "",
+        formatPaisePdf(totals.tuition),
+        totals.scholarship > 0 ? `− ${formatPaisePdf(totals.scholarship)}` : "—",
+        partialTotal(totals.exam, examUndecided),
+        partialTotal(totals.activity, activityUndecided),
+        anyPartial ? `${formatPaisePdf(totals.total)} +` : formatPaisePdf(totals.total),
+      ],
+    ],
+  };
+}
 
 type KitSemester = Prisma.SemesterGetPayload<{ include: { academicYear: true } }>;
 type KitFeeAssignment = Prisma.FeeAssignmentGetPayload<{
@@ -399,50 +498,20 @@ function drawFeePlan(doc: PdfDoc, data: WelcomeKit): void {
 
   sectionHeading(doc, "Year-wise fee");
   doc.moveDown(0.3);
-  const totals = years.reduce(
-    (sum, year) => ({
-      tuition: sum.tuition + year.tuitionPaise,
-      scholarship: sum.scholarship + year.scholarshipPaise,
-      exam: sum.exam + year.examFeePaise,
-      activity: sum.activity + year.activityFeePaise,
-      total: sum.total + year.totalPaise,
-    }),
-    { tuition: 0, scholarship: 0, exam: 0, activity: 0, total: 0 },
-  );
 
-  drawTable(
-    doc,
-    [
-      { header: "Year", width: 46 },
-      { header: "Sem.", width: 58 },
-      { header: "Tuition", width: 78, align: "right" },
-      { header: "Scholarship", width: 85, align: "right" },
-      { header: "Exam", width: 62, align: "right" },
-      { header: "Activity", width: 62, align: "right" },
-      { header: "Year total", width: 108, align: "right" },
-    ],
-    [
-      ...years.map((year) => [
-        `${year.yearNumber}${year.confirmed ? "" : " *"}`,
-        year.semesterNumbers.join(", "),
-        formatPaisePdf(year.tuitionPaise),
-        year.scholarshipPaise > 0 ? `− ${formatPaisePdf(year.scholarshipPaise)}` : "—",
-        formatPaisePdf(year.examFeePaise),
-        formatPaisePdf(year.activityFeePaise),
-        formatPaisePdf(year.totalPaise),
-      ]),
-      [
-        "All",
-        "",
-        formatPaisePdf(totals.tuition),
-        totals.scholarship > 0 ? `− ${formatPaisePdf(totals.scholarship)}` : "—",
-        formatPaisePdf(totals.exam),
-        formatPaisePdf(totals.activity),
-        formatPaisePdf(totals.total),
-      ],
-    ],
-  );
+  const { rows, anyPartial } = yearFeeTable(years);
+  drawTable(doc, YEAR_FEE_COLUMNS, rows);
   doc.moveDown(0.5);
+
+  if (anyPartial) {
+    drawParagraph(
+      doc,
+      `"${UNDECIDED}" means the institute has not yet fixed that fee for the year in question — it is not nil. ` +
+        "A total marked + covers only the fees settled so far and will rise once those are set. You will be told " +
+        "the amounts before the year begins, and they are never charged retrospectively.",
+      { size: 8 },
+    );
+  }
 
   if (years.some((year) => !year.confirmed)) {
     drawParagraph(
