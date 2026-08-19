@@ -205,6 +205,51 @@ function describeSmtpError(error: unknown, provider: string): string {
  * separately so a secret is never kept in a field the settings screen shows in
  * clear text.
  */
+/**
+ * The exact request this provider would make.
+ *
+ * Shared with the test screen so a dry run shows what a real send would put on
+ * the wire — the two cannot drift, because there is only one of them. The token
+ * is deliberately not part of it: the payload is shown to an admin on screen,
+ * and a secret has no business being rendered.
+ */
+export function templatePanelRequest(
+  config: Pick<CommunicationConfig, "whatsappApiUrl" | "whatsappSenderId" | "whatsappExtra">,
+  kind: NotificationKind,
+  to: string,
+  variables: string[],
+): { url: string; body: Record<string, string> } | { error: string } {
+  if (!config.whatsappApiUrl) return { error: "WhatsApp API URL is not configured." };
+  if (!config.whatsappSenderId) return { error: "The sender's phone number ID is not configured." };
+
+  const { names, language } = templateSettings(config.whatsappExtra);
+  const templateName = names[kind];
+  if (!templateName) {
+    return {
+      error:
+        `No approved WhatsApp template is mapped to ${kind}. Create and get the template approved in the ` +
+        `provider's panel, then name it under Setup → Communication.`,
+    };
+  }
+
+  // The panel numbers its placeholders from one: field_1, field_2, ...
+  const fields: Record<string, string> = {};
+  variables.forEach((value, index) => {
+    fields[`field_${index + 1}`] = value;
+  });
+
+  return {
+    url: config.whatsappApiUrl,
+    body: {
+      from_phone_number_id: config.whatsappSenderId,
+      phone_number: toPanelNumber(to),
+      template_name: templateName,
+      template_language: language,
+      ...fields,
+    },
+  };
+}
+
 class TemplatePanelWhatsAppProvider implements NotificationProvider {
   constructor(
     readonly name: string,
@@ -213,46 +258,22 @@ class TemplatePanelWhatsAppProvider implements NotificationProvider {
 
   async send(message: OutboundMessage): Promise<SendResult> {
     if (!message.to) return { ok: false, error: "No WhatsApp number on file." };
-    if (!this.config.whatsappApiUrl) return { ok: false, error: "WhatsApp API URL is not configured." };
     if (!this.config.whatsappApiKey) return { ok: false, error: "WhatsApp API token is not configured." };
-    if (!this.config.whatsappSenderId) {
-      return { ok: false, error: "The sender's phone number ID is not configured." };
-    }
     if (!message.kind) return { ok: false, error: "This message has no kind, so no template can be chosen." };
 
-    const { names, language } = templateSettings(this.config.whatsappExtra);
-    const templateName = names[message.kind];
-    if (!templateName) {
-      return {
-        ok: false,
-        error:
-          `No approved WhatsApp template is mapped to ${message.kind}. Create and get the template approved in ` +
-          `the provider's panel, then name it under Setup → Communication.`,
-      };
-    }
-
-    // The panel numbers its placeholders from one: field_1, field_2, ...
-    const fields: Record<string, string> = {};
-    (message.templateVariables ?? []).forEach((value, index) => {
-      fields[`field_${index + 1}`] = value;
-    });
+    const request = templatePanelRequest(this.config, message.kind, message.to, message.templateVariables ?? []);
+    if ("error" in request) return { ok: false, error: request.error };
 
     // Appended rather than concatenated so an address that already carries a
     // query string does not end up with two "?".
-    const url = new URL(this.config.whatsappApiUrl);
+    const url = new URL(request.url);
     url.searchParams.set("token", this.config.whatsappApiKey);
 
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({
-          from_phone_number_id: this.config.whatsappSenderId,
-          phone_number: toPanelNumber(message.to),
-          template_name: templateName,
-          template_language: language,
-          ...fields,
-        }),
+        body: JSON.stringify(request.body),
       });
 
       if (!response.ok) {

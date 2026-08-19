@@ -9,8 +9,23 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { deleteUpload, storeImage } from "@/lib/storage";
 import { pdfFirstPageToPng } from "@/lib/pdf-raster";
 import { getCommunicationConfig, getInstitute } from "@/lib/config";
-import { emailIsLive } from "@/lib/notification-providers";
+import {
+  emailIsLive,
+  templatePanelRequest,
+  whatsappIsLive,
+  whatsappProviderFor,
+} from "@/lib/notification-providers";
 import { DEFAULT_TEMPLATE_LANGUAGE, WHATSAPP_TEMPLATES } from "@/lib/whatsapp-templates";
+import type { NotificationKind } from "@/generated/prisma/client";
+
+/** What the WhatsApp test reports back to the screen. */
+export type TestWhatsAppResult = {
+  live: boolean;
+  delivered: boolean;
+  outcome: string;
+  url: string;
+  body: Record<string, string>;
+};
 import { deliverEmail } from "@/lib/notifications";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { PRINT_COLOR_SCHEMES, PRINT_THEMES, normalizeHex } from "@/lib/print-theme";
@@ -590,6 +605,84 @@ export async function saveCommunicationAction(_prev: unknown, formData: FormData
  * family reports never receiving their welcome kit, and the failure surfaces
  * only in the notification log.
  */
+/**
+ * Sends one message through the configured WhatsApp gateway so it can be proved
+ * before the nightly job depends on it.
+ *
+ * Runs in mock as well as live, which is the point: in mock nothing leaves the
+ * building and the screen shows the request that *would* have gone, so a
+ * template mapping can be checked before a single family is messaged. The
+ * payload comes from the same builder the real adapter uses, so a dry run
+ * cannot flatter a send that would fail.
+ *
+ * The provider's own error text is passed through untouched. "Template not
+ * approved" and "template does not exist" are the two answers this is for, and
+ * paraphrasing them would strip the only clue worth having.
+ */
+export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData): Promise<ActionResult<TestWhatsAppResult>> {
+  return runAction(async () => {
+    const user = await assertPermission(PERMISSIONS.INSTITUTE_MANAGE);
+    const to = String(formData.get("testWhatsAppTo") ?? "").trim();
+    const kind = String(formData.get("testWhatsAppKind") ?? "") as NotificationKind;
+
+    const digits = to.replace(/[^0-9]/g, "");
+    if (digits.length < 10) {
+      return fail("Enter the number to send the test to.", {
+        testWhatsAppTo: ["Enter a mobile number, with or without the country code."],
+      });
+    }
+    const spec = WHATSAPP_TEMPLATES.find((entry) => entry.kind === kind);
+    if (!spec) return fail("Choose which message to test.", { testWhatsAppKind: ["Unknown message."] });
+
+    const config = await getCommunicationConfig();
+    const live = whatsappIsLive(config);
+
+    // Built first so an unmapped template or a missing sender id is reported
+    // before anything is attempted, and so the screen can show it either way.
+    const request = templatePanelRequest(config, kind, to, spec.sample);
+    if ("error" in request) return fail(request.error);
+
+    let outcome: string;
+    let delivered = false;
+    if (live) {
+      const result = await whatsappProviderFor(config).send({
+        to,
+        body: spec.example,
+        kind,
+        templateVariables: spec.sample,
+      });
+      delivered = result.ok;
+      outcome = result.ok
+        ? `Accepted by ${config.whatsappProvider}${result.providerMessageId ? ` — id ${result.providerMessageId}` : ""}.`
+        : result.error;
+    } else {
+      outcome = "Nothing was sent — the provider is set to Mock. This is the request a live send would make.";
+    }
+
+    await recordAudit({
+      userId: user.id,
+      action: "institute.whatsapp_test",
+      entityType: "CommunicationConfig",
+      entityId: "1",
+      summary: `Test WhatsApp (${spec.label}) to ${to} — ${live ? (delivered ? "accepted" : "rejected") : "mock only"}`,
+      metadata: { kind, live, delivered, templateName: request.body.template_name },
+    });
+
+    const payload: TestWhatsAppResult = {
+      live,
+      delivered,
+      outcome,
+      url: request.url,
+      body: request.body,
+    };
+
+    // Reported as a success whenever the request could be built: the screen
+    // shows what happened, and a rejection by the provider is information the
+    // admin needs rather than a form error to be cleared.
+    return ok(payload, live && delivered ? `Test message accepted for ${to}.` : undefined);
+  });
+}
+
 export async function sendTestEmailAction(_prev: unknown, formData: FormData): Promise<ActionResult<undefined>> {
   return runAction(async () => {
     const user = await assertPermission(PERMISSIONS.INSTITUTE_MANAGE);

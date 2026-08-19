@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ActionForm, SubmitButton, fieldError } from "@/components/form";
 import { Alert, Card, Checkbox, Field, FormActions, FormGrid, Input, Select } from "@/components/ui";
-import { saveCommunicationAction, sendTestEmailAction } from "../actions";
+import { saveCommunicationAction, sendTestEmailAction, sendTestWhatsAppAction } from "../actions";
 
 /** Secrets are never sent back to the browser — only whether one is stored. */
 type CommsView = {
@@ -293,6 +293,114 @@ export function EmailTestCard({ isLive }: { isLive: boolean }) {
           </div>
         )}
       </ActionForm>
+    </Card>
+  );
+}
+
+/**
+ * Proves the WhatsApp gateway before the nightly job depends on it.
+ *
+ * Deliberately usable while the provider is still Mock. Nothing leaves the
+ * building then, and the request that *would* have gone is printed instead — a
+ * template mapping and a sender id can be checked before a single family is
+ * messaged. Once the provider is live the same button sends for real.
+ */
+export function WhatsAppTestCard({
+  isLive,
+  templates,
+  mapped,
+}: {
+  isLive: boolean;
+  templates: TemplateView[];
+  /** Kinds that actually have a template name saved. */
+  mapped: string[];
+}) {
+  const sendable = templates.filter((template) => mapped.includes(template.kind));
+
+  return (
+    <Card
+      title="Send a test WhatsApp"
+      description="Uses the saved settings. Save any changes above first."
+    >
+      <div className="mb-4">
+        <Alert tone={isLive ? "info" : "warning"}>
+          {isLive
+            ? "The provider is live, so this sends a real WhatsApp message. Use your own number."
+            : "The provider is set to Mock, so nothing is delivered — the request that a live send would make is shown instead. That is enough to check a template name, the sender ID and the values that fill the blanks."}
+        </Alert>
+      </div>
+
+      {sendable.length === 0 ? (
+        <Alert tone="warning" title="No templates mapped yet">
+          Name at least one approved template above and save. Until then there is nothing WhatsApp could be asked
+          to send.
+        </Alert>
+      ) : (
+        <ActionForm action={sendTestWhatsAppAction}>
+          {(state) => {
+            const result =
+              state?.ok && state.data && typeof state.data === "object"
+                ? (state.data as {
+                    live: boolean;
+                    delivered: boolean;
+                    outcome: string;
+                    url: string;
+                    body: Record<string, string>;
+                  })
+                : null;
+            return (
+              <>
+                <div className="flex flex-wrap items-end gap-3">
+                  <Field
+                    label="Send to"
+                    htmlFor="testWhatsAppTo"
+                    hint="With or without +91."
+                    error={fieldError(state, "testWhatsAppTo")}
+                    className="min-w-56 flex-1"
+                  >
+                    <Input id="testWhatsAppTo" name="testWhatsAppTo" placeholder="98200 11111" required />
+                  </Field>
+                  <Field
+                    label="Message"
+                    htmlFor="testWhatsAppKind"
+                    error={fieldError(state, "testWhatsAppKind")}
+                    className="min-w-56 flex-1"
+                  >
+                    <Select id="testWhatsAppKind" name="testWhatsAppKind" defaultValue={sendable[0]?.kind}>
+                      {sendable.map((template) => (
+                        <option key={template.kind} value={template.kind}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <SubmitButton variant="secondary" pendingLabel="Sending…">
+                    {isLive ? "Send test" : "Show the request"}
+                  </SubmitButton>
+                </div>
+
+                {result ? (
+                  <div className="mt-4 space-y-3">
+                    <Alert tone={result.live ? (result.delivered ? "success" : "danger") : "info"}>
+                      {result.outcome}
+                    </Alert>
+                    <div>
+                      <p className="text-xs font-medium text-muted">
+                        The request {result.live ? "sent" : "a live send would make"} — the token is not shown
+                      </p>
+                      <pre className="mt-1 overflow-x-auto rounded-md border border-border bg-background p-3 text-xs">
+                        {`POST ${result.url}
+
+${JSON.stringify(result.body, null, 2)}`}
+                      </pre>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            );
+          }}
+        </ActionForm>
+      )}
     </Card>
   );
 }

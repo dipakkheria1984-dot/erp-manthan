@@ -1,8 +1,8 @@
 import { getCommunicationConfig } from "@/lib/config";
-import { emailIsLive } from "@/lib/notification-providers";
+import { emailIsLive, whatsappIsLive } from "@/lib/notification-providers";
 import { WHATSAPP_TEMPLATES, templateSettings } from "@/lib/whatsapp-templates";
 import { PageHeader } from "@/components/ui";
-import { CommunicationForm, EmailTestCard } from "./communication-form";
+import { CommunicationForm, EmailTestCard, WhatsAppTestCard } from "./communication-form";
 
 export const metadata = { title: "Communication · Setup" };
 
@@ -41,6 +41,16 @@ export default async function CommunicationPage() {
           }))}
         />
         <EmailTestCard isLive={emailIsLive(config)} />
+        <WhatsAppTestCard
+          isLive={whatsappIsLive(config)}
+          templates={WHATSAPP_TEMPLATES.map((t) => ({
+            kind: t.kind,
+            label: t.label,
+            variables: t.variables,
+            example: t.example,
+          }))}
+          mapped={Object.keys(settings.names)}
+        />
       </div>
     </>
   );

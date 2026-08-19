@@ -35,6 +35,8 @@ export type WhatsAppTemplateSpec = {
   variables: string[];
   /** Shown under the field so the template can be drafted to match. */
   example: string;
+  /** Stand-in values for a test send, in the same order as `variables`. */
+  sample: string[];
 };
 
 export const WHATSAPP_TEMPLATES: WhatsAppTemplateSpec[] = [
@@ -43,48 +45,56 @@ export const WHATSAPP_TEMPLATES: WhatsAppTemplateSpec[] = [
     label: "Fee due soon",
     variables: ["Student name", "Installment number", "Due date", "Total payable"],
     example: "Dear {{1}}, installment {{2}} is due on {{3}}. Total payable {{4}}.",
+    sample: ["Test Student", "2", "07 Sep 2026", "₹25,000.00"],
   },
   {
     kind: "FEE_OVERDUE",
     label: "Fee overdue",
     variables: ["Student name", "Installment number", "Due date", "Total payable"],
     example: "Dear {{1}}, installment {{2}} was due on {{3}} and is unpaid. Total payable {{4}}.",
+    sample: ["Test Student", "2", "07 Aug 2026", "₹25,000.00"],
   },
   {
     kind: "WELCOME",
     label: "Welcome / admission confirmed",
     variables: ["Student name", "Student ID", "Course", "Batch"],
     example: "Dear {{1}}, your admission is confirmed. Student ID {{2}}, course {{3}}, batch {{4}}.",
+    sample: ["Test Student", "IIFD-KOL-00001", "B.DES IN FASHION", "2026 ADF BATCH B"],
   },
   {
     kind: "APPLICATION_SUBMITTED",
     label: "Application received",
     variables: ["Applicant name", "Application ID"],
     example: "Dear {{1}}, we have received your admission application {{2}}.",
+    sample: ["Test Applicant", "APP00001"],
   },
   {
     kind: "APPLICATION_STATUS_CHANGE",
     label: "Application status changed",
     variables: ["Applicant name", "Application ID", "New status"],
     example: "Dear {{1}}, the status of application {{2}} is now {{3}}.",
+    sample: ["Test Applicant", "APP00001", "under review"],
   },
   {
     kind: "APPLICATION_INCOMPLETE",
     label: "Application incomplete",
     variables: ["Applicant name"],
     example: "Dear {{1}}, your admission application is still incomplete.",
+    sample: ["Test Applicant"],
   },
   {
     kind: "DOCUMENTS_PENDING",
     label: "Documents pending",
     variables: ["Applicant name", "Application ID"],
     example: "Dear {{1}}, some documents are still pending on application {{2}}.",
+    sample: ["Test Applicant", "APP00001"],
   },
   {
     kind: "APPLICATION_LINK",
     label: "Online admission form link",
     variables: ["Applicant name", "Form link"],
     example: "Dear {{1}}, here is your admission form: {{2}}",
+    sample: ["Test Applicant", "https://example.com/apply/sample-link"],
   },
 ];
 
