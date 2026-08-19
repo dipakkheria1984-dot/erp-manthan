@@ -50,6 +50,12 @@ type DeliverInput = {
   installmentId?: string;
   /** Pre-resolved providers. Looked up per call when absent. */
   channels?: Channels;
+  /**
+   * Values for this kind's approved WhatsApp template, in the order
+   * src/lib/whatsapp-templates.ts declares. Email ignores them and sends
+   * `body`; a template-only gateway can send nothing without them.
+   */
+  templateVariables?: string[];
 };
 
 export async function deliver(input: DeliverInput): Promise<{ sent: number; failed: number }> {
@@ -84,6 +90,8 @@ export async function deliver(input: DeliverInput): Promise<{ sent: number; fail
       to: target.to,
       subject: input.subject,
       body: input.body,
+      kind: input.kind,
+      templateVariables: input.templateVariables,
     });
 
     if (result.ok) {
@@ -217,6 +225,20 @@ export async function queueApplicationNotification(applicationId: string, kind: 
   const message = messages[kind];
   if (!message) return;
 
+  // Order matters and is fixed by the template's own {{1}}, {{2}} — see
+  // WHATSAPP_TEMPLATES, which is written against these same sequences.
+  const applicationNo = application.applicationNo ?? "—";
+  const templateVariables: Record<string, string[]> = {
+    APPLICATION_SUBMITTED: [application.fullName, applicationNo],
+    APPLICATION_STATUS_CHANGE: [
+      application.fullName,
+      applicationNo,
+      application.status.replaceAll("_", " ").toLowerCase(),
+    ],
+    APPLICATION_INCOMPLETE: [application.fullName],
+    DOCUMENTS_PENDING: [application.fullName, applicationNo],
+  };
+
   await deliver({
     kind,
     applicationId,
@@ -226,6 +248,7 @@ export async function queueApplicationNotification(applicationId: string, kind: 
     },
     subject: message.subject,
     body: message.body,
+    templateVariables: templateVariables[kind],
   });
 }
 
@@ -244,6 +267,7 @@ export async function queueWelcomeNotification(studentId: string): Promise<void>
     kind: "WELCOME",
     studentId,
     recipient: { email: student.email, phone: student.phone },
+    templateVariables: [student.fullName, student.studentCode, student.course.name, student.batch.name],
     subject: `Welcome to ${instituteName}`,
     body:
       `Dear ${student.fullName},\n\n` +
@@ -321,6 +345,12 @@ export async function sendFeeReminder({
     kind,
     installmentId,
     studentId: student.id,
+    templateVariables: [
+      student.fullName,
+      String(seqNo),
+      formatDate(dueDate),
+      formatPaise(outstandingPaise + lateFeePaise),
+    ],
     // An empty string is a contact nobody can be reached on, so it falls through
     // to the guardian exactly as a missing one does. `??` alone would keep it
     // and quietly address the reminder to nowhere.

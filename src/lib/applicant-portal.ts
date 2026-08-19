@@ -181,6 +181,7 @@ export async function sendApplicantLink(application: Application, token: string)
     kind: "APPLICATION_LINK",
     applicationId: application.id,
     recipient: { email: application.email || null, phone: application.phone || null },
+    templateVariables: [application.fullName, link],
     subject: `Your admission form — ${instituteName}`,
     body:
       `Dear ${application.fullName},\n\n` +

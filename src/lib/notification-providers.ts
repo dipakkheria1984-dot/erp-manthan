@@ -1,6 +1,7 @@
 import "server-only";
 import nodemailer from "nodemailer";
-import type { CommunicationConfig } from "@/generated/prisma/client";
+import type { CommunicationConfig, NotificationKind } from "@/generated/prisma/client";
+import { templateSettings } from "@/lib/whatsapp-templates";
 
 /**
  * Pluggable notification transport (spec 11.2).
@@ -27,6 +28,14 @@ export type OutboundMessage = {
   body: string;
   /** Email only. Text-based WhatsApp adapters ignore these. */
   attachments?: Attachment[];
+  /**
+   * Which message this is, and the values that fill its approved WhatsApp
+   * template — see src/lib/whatsapp-templates.ts. Email ignores both and sends
+   * `body`; a template-only gateway ignores `body` and can send nothing without
+   * them.
+   */
+  kind?: NotificationKind;
+  templateVariables?: string[];
 };
 
 export interface NotificationProvider {
@@ -178,6 +187,109 @@ function describeSmtpError(error: unknown, provider: string): string {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Panels that resell the WhatsApp Business API as an approved-template service.
+ *
+ * Two things set these apart from the adapters below, and both break the
+ * assumptions the generic one makes:
+ *
+ *  - **The token travels in the query string**, not an Authorization header.
+ *    Sending it as a bearer header authenticates as nobody and the call is
+ *    rejected.
+ *  - **There is no message body.** The payload carries a template name and
+ *    numbered fields; the composed text this system produces for email has
+ *    nowhere to go. A message whose template has not been approved and mapped
+ *    therefore cannot be sent at all, which is reported as such rather than
+ *    posted and silently dropped.
+ *
+ * The URL holds the account path the panel issued; the token is stored
+ * separately so a secret is never kept in a field the settings screen shows in
+ * clear text.
+ */
+class TemplatePanelWhatsAppProvider implements NotificationProvider {
+  constructor(
+    readonly name: string,
+    private readonly config: CommunicationConfig,
+  ) {}
+
+  async send(message: OutboundMessage): Promise<SendResult> {
+    if (!message.to) return { ok: false, error: "No WhatsApp number on file." };
+    if (!this.config.whatsappApiUrl) return { ok: false, error: "WhatsApp API URL is not configured." };
+    if (!this.config.whatsappApiKey) return { ok: false, error: "WhatsApp API token is not configured." };
+    if (!this.config.whatsappSenderId) {
+      return { ok: false, error: "The sender's phone number ID is not configured." };
+    }
+    if (!message.kind) return { ok: false, error: "This message has no kind, so no template can be chosen." };
+
+    const { names, language } = templateSettings(this.config.whatsappExtra);
+    const templateName = names[message.kind];
+    if (!templateName) {
+      return {
+        ok: false,
+        error:
+          `No approved WhatsApp template is mapped to ${message.kind}. Create and get the template approved in ` +
+          `the provider's panel, then name it under Setup → Communication.`,
+      };
+    }
+
+    // The panel numbers its placeholders from one: field_1, field_2, ...
+    const fields: Record<string, string> = {};
+    (message.templateVariables ?? []).forEach((value, index) => {
+      fields[`field_${index + 1}`] = value;
+    });
+
+    // Appended rather than concatenated so an address that already carries a
+    // query string does not end up with two "?".
+    const url = new URL(this.config.whatsappApiUrl);
+    url.searchParams.set("token", this.config.whatsappApiKey);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          from_phone_number_id: this.config.whatsappSenderId,
+          phone_number: toPanelNumber(message.to),
+          template_name: templateName,
+          template_language: language,
+          ...fields,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        return { ok: false, error: `${this.name} returned ${response.status}. ${text.slice(0, 200)}`.trim() };
+      }
+
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      // These panels disagree about the success envelope, so a body that
+      // explicitly says it failed is treated as a failure even on HTTP 200.
+      if (data.status === "error" || data.success === false) {
+        return { ok: false, error: String(data.message ?? "The provider rejected the message.").slice(0, 200) };
+      }
+      const id = (data.message_id ?? data.messageId ?? data.id) as string | undefined;
+      return { ok: true, providerMessageId: id };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "WhatsApp delivery failed." };
+    }
+  }
+}
+
+/**
+ * Numbers as these panels expect them: country code and subscriber digits, no
+ * plus, no spaces. Stored numbers are typed by staff and arrive as "+91 98200
+ * 11111" as often as "9820011111", so they are normalised here rather than
+ * relying on every screen to have been consistent. A bare ten-digit Indian
+ * number is given its country code; anything already carrying one is left be.
+ */
+export function toPanelNumber(raw: string): string {
+  const digits = raw.replace(/[^0-9]/g, "");
+  if (digits.length === 10) return `91${digits}`;
+  // 0-prefixed STD form, e.g. 09820011111.
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  return digits;
+}
+
+/**
  * Generic HTTP WhatsApp adapter. Each supported gateway differs only in its
  * request shape, so the payload builder is selected by provider name and
  * everything else — auth header, error handling, message id — is shared.
@@ -254,5 +366,12 @@ export function emailIsLive(config: CommunicationConfig): boolean {
 export function whatsappProviderFor(config: CommunicationConfig): NotificationProvider {
   const provider = config.whatsappProvider ?? "mock";
   if (provider === "mock" || !config.whatsappApiUrl) return new MockProvider("whatsapp:mock");
+  if (provider === "template_panel") return new TemplatePanelWhatsAppProvider(provider, config);
   return new HttpWhatsAppProvider(provider, config);
+}
+
+/** True when WhatsApp actually leaves the building, rather than going to the log. */
+export function whatsappIsLive(config: CommunicationConfig): boolean {
+  const provider = config.whatsappProvider ?? "mock";
+  return provider !== "mock" && Boolean(config.whatsappApiUrl);
 }

@@ -17,11 +17,22 @@ type CommsView = {
   whatsappProvider: string | null;
   whatsappApiUrl: string | null;
   whatsappSenderId: string | null;
+  whatsappTemplateLanguage: string;
+  whatsappTemplateNames: Record<string, string | undefined>;
   hasSmtpPassword: boolean;
   hasWhatsappApiKey: boolean;
 };
 
-export function CommunicationForm({ config }: { config: CommsView }) {
+/** The template specs, passed in because their module is server-only. */
+type TemplateView = { kind: string; label: string; variables: string[]; example: string };
+
+export function CommunicationForm({
+  config,
+  templates,
+}: {
+  config: CommsView;
+  templates: TemplateView[];
+}) {
   const [provider, setProvider] = useState(config.emailProvider);
   const isGmail = provider === "gmail";
 
@@ -169,6 +180,7 @@ export function CommunicationForm({ config }: { config: CommsView }) {
                     <option value="twilio">Twilio</option>
                     <option value="gupshup">Gupshup</option>
                     <option value="meta">Meta WhatsApp Business API</option>
+                    <option value="template_panel">Reseller panel (approved templates)</option>
                   </Select>
                 </Field>
                 <Field label="API URL" htmlFor="whatsappApiUrl" error={fieldError(state, "whatsappApiUrl")}>
@@ -182,10 +194,63 @@ export function CommunicationForm({ config }: { config: CommsView }) {
                 >
                   <Input id="whatsappApiKey" name="whatsappApiKey" type="password" autoComplete="new-password" placeholder={config.hasWhatsappApiKey ? "••••••••" : ""} />
                 </Field>
-                <Field label="Sender ID / from number" htmlFor="whatsappSenderId" error={fieldError(state, "whatsappSenderId")}>
+                <Field
+                  label="Sender ID / from number"
+                  htmlFor="whatsappSenderId"
+                  hint="On a reseller panel this is the from_phone_number_id it issued, not the phone number itself."
+                  error={fieldError(state, "whatsappSenderId")}
+                >
                   <Input id="whatsappSenderId" name="whatsappSenderId" defaultValue={config.whatsappSenderId ?? ""} />
                 </Field>
               </FormGrid>
+            </div>
+
+            <div className="mt-6 border-t border-border pt-4">
+              <p className="text-sm font-medium">Approved message templates</p>
+              <div className="mt-3">
+                <Alert tone="warning" title="WhatsApp cannot send free text">
+                  Meta only allows a business to open a conversation with a template it has approved in advance,
+                  so the wording below is fixed when the template is approved — not by this system. Create each
+                  one in your provider&rsquo;s panel with the placeholders in the order listed, wait for approval,
+                  then put its name here. A message with no template mapped is not sent, and says so in the log.
+                </Alert>
+              </div>
+
+              <div className="mt-4 max-w-xs">
+                <Field
+                  label="Template language"
+                  htmlFor="whatsappTemplateLanguage"
+                  hint="The language code the templates were approved under, e.g. en or en_US."
+                  error={fieldError(state, "whatsappTemplateLanguage")}
+                >
+                  <Input
+                    id="whatsappTemplateLanguage"
+                    name="whatsappTemplateLanguage"
+                    defaultValue={config.whatsappTemplateLanguage}
+                  />
+                </Field>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                {templates.map((template) => (
+                  <Field
+                    key={template.kind}
+                    label={`${template.label} — template name`}
+                    htmlFor={`tpl-${template.kind}`}
+                    hint={`Placeholders in order: ${template.variables
+                      .map((variable, index) => `{{${index + 1}}} ${variable}`)
+                      .join(", ")}. Example: ${template.example}`}
+                    error={fieldError(state, `template_${template.kind}`)}
+                  >
+                    <Input
+                      id={`tpl-${template.kind}`}
+                      name={`template_${template.kind}`}
+                      defaultValue={config.whatsappTemplateNames[template.kind] ?? ""}
+                      placeholder="Not mapped — this message will not be sent on WhatsApp"
+                    />
+                  </Field>
+                ))}
+              </div>
             </div>
             <FormActions>
               <SubmitButton pendingLabel="Saving…">Save communication settings</SubmitButton>

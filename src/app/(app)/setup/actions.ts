@@ -10,6 +10,7 @@ import { deleteUpload, storeImage } from "@/lib/storage";
 import { pdfFirstPageToPng } from "@/lib/pdf-raster";
 import { getCommunicationConfig, getInstitute } from "@/lib/config";
 import { emailIsLive } from "@/lib/notification-providers";
+import { DEFAULT_TEMPLATE_LANGUAGE, WHATSAPP_TEMPLATES } from "@/lib/whatsapp-templates";
 import { deliverEmail } from "@/lib/notifications";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { PRINT_COLOR_SCHEMES, PRINT_THEMES, normalizeHex } from "@/lib/print-theme";
@@ -487,7 +488,7 @@ const communicationSchema = z.object({
   smtpPassword: optionalText,
   smtpFromName: optionalText,
   smtpFromEmail: optionalText,
-  whatsappProvider: z.enum(["mock", "twilio", "gupshup", "meta"]),
+  whatsappProvider: z.enum(["mock", "twilio", "gupshup", "meta", "template_panel"]),
   whatsappApiUrl: optionalText,
   whatsappApiKey: optionalText,
   whatsappSenderId: optionalText,
@@ -536,11 +537,38 @@ export async function saveCommunicationAction(_prev: unknown, formData: FormData
         whatsappApiUrl: ["Required for a live provider."],
       });
     }
+    // A reseller panel authenticates with the token and identifies the sender by
+    // the id it issued; without either it can only fail, one message at a time.
+    if (data.whatsappProvider === "template_panel") {
+      if (!data.whatsappApiKey) {
+        return fail("This provider needs its API token.", { whatsappApiKey: ["Required for a reseller panel."] });
+      }
+      if (!data.whatsappSenderId) {
+        return fail("This provider needs the sender's phone number ID.", {
+          whatsappSenderId: ["Required — the from_phone_number_id from the panel."],
+        });
+      }
+      try {
+        new URL(data.whatsappApiUrl!);
+      } catch {
+        return fail("The API URL is not a valid address.", { whatsappApiUrl: ["Use the full https:// address."] });
+      }
+    }
+
+    // Template names are per-account strings chosen in the provider's own panel,
+    // so they live in the config's free-form JSON rather than a column apiece.
+    const names: Record<string, string> = {};
+    for (const template of WHATSAPP_TEMPLATES) {
+      const value = String(formData.get(`template_${template.kind}`) ?? "").trim();
+      if (value) names[template.kind] = value;
+    }
+    const language = String(formData.get("whatsappTemplateLanguage") ?? "").trim() || DEFAULT_TEMPLATE_LANGUAGE;
+    const whatsappExtra = { names, language };
 
     await prisma.communicationConfig.upsert({
       where: { id: 1 },
-      update: data,
-      create: { id: 1, ...data },
+      update: { ...data, whatsappExtra },
+      create: { id: 1, ...data, whatsappExtra },
     });
 
     await recordAudit({
