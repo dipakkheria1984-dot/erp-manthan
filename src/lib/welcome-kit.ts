@@ -43,8 +43,9 @@ import type { Prisma } from "@/generated/prisma/client";
  *   1. Welcome & admission confirmation letter
  *   2. Admission form
  *   3. Year-wise fee payment plan
- *   4. Terms & conditions
- *   5. Registration fee receipt(s)
+   *   4. Terms & conditions
+ *   5. Declaration and agreement statement
+ *   6. Registration fee receipt(s)
  *
  * The admission form and the receipts are drawn by the same code that serves
  * them on their own routes (src/lib/pdf-sections.ts), so the bound copy and the
@@ -378,6 +379,9 @@ export async function buildWelcomeKitPdf(data: WelcomeKit): Promise<Buffer> {
   doc.addPage();
   drawTermsPage(doc, data);
 
+  doc.addPage();
+  drawDeclarationPage(doc, data);
+
   drawRegistrationReceipts(doc, data);
 
   drawPageNumbers(doc, `Welcome kit  ·  ${student.studentCode}`);
@@ -618,7 +622,108 @@ function drawTermsPage(doc: PdfDoc, data: WelcomeKit): void {
   drawSignatureRow(doc, "Student / guardian signature", `For ${institute.name}`);
 }
 
-/* 5 — Registration fee receipt(s) ------------------------------------------- */
+/* 5 — Declaration and agreement --------------------------------------------- */
+
+/**
+ * The clauses the applicant signs against, exactly as the institute worded
+ * them.
+ *
+ * Held verbatim and as data rather than folded into the drawing code: this is a
+ * legal undertaking, so the numbering it is signed under has to be the
+ * numbering that was written, and a clause can be revised without touching
+ * layout. Numbers are generated from the order, which is why none is typed in.
+ */
+const DECLARATION_CLAUSES: string[] = [
+  "Declare that the information and supporting documentation provided is true and complete as per my knowledge.",
+  "Indian Institute Of Fashion & Design is an autonomous college. Indian Institute Of Fashion & Design does not " +
+    "offer any degree programs of its own. However, it facilitates students who wish to pursue Indian or " +
+    "international degree programs in UGC/AICTE approved universities, and thus facilitates admissions into the " +
+    "same. Indian Institute Of Fashion & Design provides extensive classroom training programs as per Indian and " +
+    "International global standards.",
+  "I have read, understood and agree to be bound by the college refund policy and conditions.",
+  "I am aware of the tuition and living costs for my stay are separate (if availing Hostel Facility) and have the " +
+    "financial capacity to meet such costs for the duration of my program. I am responsible for making timely " +
+    "payments of any fees or associated costs and for funding my living costs throughout the course.",
+  "Declare that any academic results submitted are a complete record of all results that I have obtained from " +
+    "every secondary and/or post-secondary institution I have attended and acknowledge that failure to disclose " +
+    "my academic record may result in the revoking an offer or terminating my studies at any stage.",
+  "Authorize the college to seek verification of my academic and professional qualifications, work experience and " +
+    "other documentation provided to support my application. I understand that the institute reserves the right " +
+    "to inform other tertiary institutions and agencies if any of the material presented to support my " +
+    "application is found to be false.",
+  "I understand that the college reserves the right to not issue an offer or revoke an existing offer if it is " +
+    "unable to verify the authenticity of documentation provided to support my application.",
+  "Acknowledge that Indian Institute Of Fashion & Design reserves the right at any stage to vary or reverse any " +
+    "decision regarding admission or enrollment made on the basis of incorrect, incomplete or fraudulent " +
+    "information.",
+  "Acknowledge that the college reserves the right to alter any course, subject, admission requirement or fee " +
+    "without notice.",
+  "Agree to advise the college within seven days of any subsequent changes to my residential address or contact " +
+    "info in India.",
+  "Declare that my signature is true and correct, and matches the signature in my passport, ID proof.",
+  "Have properly read, understood and accept each and every condition mentioned above.",
+];
+
+/**
+ * The declaration page.
+ *
+ * The name is left as a rule to be completed by hand rather than printed from
+ * the record: the parenthetical directs a parent or guardian to fill it in for
+ * an applicant under 18, so whose name belongs there is not something this
+ * system knows.
+ */
+function drawDeclarationPage(doc: PdfDoc, data: WelcomeKit): void {
+  const { institute } = data;
+  const palette = paletteOf(doc);
+
+  drawHeader(doc, institute, "DECLARATION AND AGREEMENT STATEMENT");
+
+  const left = doc.page.margins.left;
+  const width = doc.page.width - left - doc.page.margins.right;
+
+  // "I, ______" on one line: the rule is drawn rather than typed as underscores
+  // so it stays a straight line whatever face the theme uses.
+  applyFontFor(doc, "I,").fontSize(10).fillColor(palette.ink).text("I,", left, doc.y, { continued: false });
+  const ruleY = doc.y - 2;
+  doc
+    .save()
+    .lineWidth(0.6)
+    .strokeColor(palette.rule)
+    .moveTo(left + 16, ruleY)
+    .lineTo(left + width, ruleY)
+    .stroke()
+    .restore();
+  doc.moveDown(0.6);
+
+  drawParagraph(
+    doc,
+    "(Applicant’s full name in BLOCK LETTERS. If the applicant is under 18 years of age, the " +
+      "parent/guardian must complete this section.)",
+    { size: 8, gap: 0.8 },
+  );
+
+  // Hanging indent so a wrapped clause lines up under its own text rather than
+  // under its number.
+  const numberWidth = 18;
+  DECLARATION_CLAUSES.forEach((clause, index) => {
+    ensureSpace(doc, 46);
+    const top = doc.y;
+    applyFontFor(doc, "1").fontSize(8.5).fillColor(palette.ink).text(`${index + 1}.`, left, top, {
+      width: numberWidth,
+    });
+    applyFontFor(doc, clause)
+      .fontSize(8.5)
+      .fillColor(palette.ink)
+      .text(clause, left + numberWidth, top, { width: width - numberWidth, align: "left", lineGap: 1.5 });
+    doc.moveDown(0.45);
+    doc.x = left;
+  });
+
+  doc.moveDown(0.6);
+  drawSignatureRow(doc, "Signature of applicant / parent / guardian", "Date and place");
+}
+
+/* 6 — Registration fee receipt(s) ------------------------------------------- */
 
 function drawRegistrationReceipts(doc: PdfDoc, data: WelcomeKit): void {
   const { institute } = data;
