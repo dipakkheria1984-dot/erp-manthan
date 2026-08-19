@@ -447,23 +447,29 @@ function drawWelcomeLetter(doc: PdfDoc, data: WelcomeKit): void {
 
   sectionHeading(doc, "What this kit contains");
   doc.moveDown(0.3);
+  // Numbered from the order rather than typed in. The list is a description of
+  // the pages that follow, and the two have to be added to together — writing
+  // the numbers by hand is how it came to promise five documents while six were
+  // being bound in.
   const contents = [
-    "1.  This welcome and admission confirmation letter",
-    "2.  Your admission form as recorded by the institute",
-    "3.  The year-wise fee payment plan and installment schedule",
-    "4.  The terms & conditions that apply to your admission",
+    "This welcome and admission confirmation letter",
+    "Your admission form as recorded by the institute",
+    "The year-wise fee payment plan and installment schedule",
+    "The terms & conditions that apply to your admission",
+    "The declaration and agreement statement, for you to sign and return",
     data.receipts.length > 0
-      ? "5.  Your registration fee receipt"
-      : "5.  Registration fee receipt — none recorded on this admission",
+      ? "Your registration fee receipt"
+      : "Registration fee receipt — none recorded on this admission",
   ];
-  for (const line of contents) drawParagraph(doc, line, { size: 9, gap: 0.15 });
+  contents.forEach((line, index) => drawParagraph(doc, `${index + 1}.  ${line}`, { size: 9, gap: 0.15 }));
   doc.moveDown(0.6);
 
   drawParagraph(
     doc,
-    "Please read the enclosed terms & conditions carefully and keep this kit for your records. " +
-      "Fee due dates are listed in the payment plan; reminders are sent before each due date and a late fee applies " +
-      "after it. For any correction to the details printed here, contact the admissions office.",
+    "Please read the enclosed terms & conditions carefully, sign the declaration and agreement statement and " +
+      "return it to the admissions office, and keep this kit for your records. Fee due dates are listed in the " +
+      "payment plan; reminders are sent before each due date and a late fee applies after it. For any correction " +
+      "to the details printed here, contact the admissions office.",
   );
   drawParagraph(doc, "We look forward to welcoming you.", { gap: 0.4 });
 
