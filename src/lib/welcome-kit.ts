@@ -625,6 +625,16 @@ function drawTermsPage(doc: PdfDoc, data: WelcomeKit): void {
 /* 5 — Declaration and agreement --------------------------------------------- */
 
 /**
+ * Stands in for the institute's own name inside a clause.
+ *
+ * An explicit token rather than searching the finished sentence for whatever
+ * the name happens to be: the substitution point is then visible in the clause
+ * being read, and renaming the institute cannot start rewriting words that were
+ * never meant to be the name.
+ */
+const INSTITUTE = "{institute}";
+
+/**
  * The clauses the applicant signs against, exactly as the institute worded
  * them.
  *
@@ -635,10 +645,10 @@ function drawTermsPage(doc: PdfDoc, data: WelcomeKit): void {
  */
 const DECLARATION_CLAUSES: string[] = [
   "Declare that the information and supporting documentation provided is true and complete as per my knowledge.",
-  "Indian Institute Of Fashion & Design is an autonomous college. Indian Institute Of Fashion & Design does not " +
+  `${INSTITUTE} is an autonomous college. ${INSTITUTE} does not ` +
     "offer any degree programs of its own. However, it facilitates students who wish to pursue Indian or " +
     "international degree programs in UGC/AICTE approved universities, and thus facilitates admissions into the " +
-    "same. Indian Institute Of Fashion & Design provides extensive classroom training programs as per Indian and " +
+    `same. ${INSTITUTE} provides extensive classroom training programs as per Indian and ` +
     "International global standards.",
   "I have read, understood and agree to be bound by the college refund policy and conditions.",
   "I am aware of the tuition and living costs for my stay are separate (if availing Hostel Facility) and have the " +
@@ -653,7 +663,7 @@ const DECLARATION_CLAUSES: string[] = [
     "application is found to be false.",
   "I understand that the college reserves the right to not issue an offer or revoke an existing offer if it is " +
     "unable to verify the authenticity of documentation provided to support my application.",
-  "Acknowledge that Indian Institute Of Fashion & Design reserves the right at any stage to vary or reverse any " +
+  `Acknowledge that ${INSTITUTE} reserves the right at any stage to vary or reverse any ` +
     "decision regarding admission or enrollment made on the basis of incorrect, incomplete or fraudulent " +
     "information.",
   "Acknowledge that the college reserves the right to alter any course, subject, admission requirement or fee " +
@@ -705,7 +715,11 @@ function drawDeclarationPage(doc: PdfDoc, data: WelcomeKit): void {
   // Hanging indent so a wrapped clause lines up under its own text rather than
   // under its number.
   const numberWidth = 18;
-  DECLARATION_CLAUSES.forEach((clause, index) => {
+  DECLARATION_CLAUSES.forEach((raw, index) => {
+    // The institute's own name as configured, so a rename in Setup carries into
+    // the wording rather than leaving the letterhead and the clauses disagreeing
+    // about who the student is contracting with.
+    const clause = raw.split(INSTITUTE).join(institute.name);
     ensureSpace(doc, 46);
     const top = doc.y;
     applyFontFor(doc, "1").fontSize(8.5).fillColor(palette.ink).text(`${index + 1}.`, left, top, {
