@@ -310,21 +310,36 @@ class TemplatePanelWhatsAppProvider implements NotificationProvider {
         };
       }
 
+      // These panels nest the useful part: `{"result":"success","data":{"wamid":…}}`
+      // as often as they put an id at the top level.
+      const nested = (data.data ?? {}) as Record<string, unknown>;
+      const id = (data.message_id ?? data.messageId ?? data.id ?? nested.wamid ?? nested.message_id) as
+        | string
+        | undefined;
+
       // Treated as failure unless the answer positively says otherwise. The
       // opposite default — success unless it says "error" — reported messages
       // as sent that the panel never accepted, which is worse than a false
       // alarm because nobody goes looking.
+      //
+      // `result` belongs in this list for the same reason: without it a panel
+      // answering `{"result":"success"}` would have every delivered message
+      // logged as a failure, which is the same lie told the other way round.
       const succeeded =
+        data.result === "success" ||
         data.status === "success" ||
         data.success === true ||
-        Boolean(data.message_id ?? data.messageId ?? data.id);
+        Boolean(id);
 
-      if (!succeeded) {
-        const said = String(data.message ?? data.error ?? data.status ?? "no acknowledgement");
+      // An explicit failure wins over an id that happens to be present, so a
+      // rejection carrying a null wamid is never read as an acknowledgement.
+      const refused = data.result === "failed" || data.status === "error" || data.success === false;
+
+      if (refused || !succeeded) {
+        const said = String(data.message ?? data.error ?? data.result ?? data.status ?? "no acknowledgement");
         return { ok: false, error: `${this.name} did not acknowledge the message: ${said}`.slice(0, 300), diagnostic };
       }
 
-      const id = (data.message_id ?? data.messageId ?? data.id) as string | undefined;
       return { ok: true, providerMessageId: id, diagnostic };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : "WhatsApp delivery failed." };
