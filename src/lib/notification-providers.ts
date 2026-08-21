@@ -282,7 +282,7 @@ class TemplatePanelWhatsAppProvider implements NotificationProvider {
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
+        headers: { "content-type": "application/json; charset=utf-8", accept: "application/json" },
         body: JSON.stringify(request.body),
       });
 

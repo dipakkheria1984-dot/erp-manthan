@@ -43,6 +43,12 @@ export type TestWhatsAppResult = {
   /** Exactly what the gateway answered, so a silent non-delivery is readable. */
   responseStatus?: number;
   responseBody?: string;
+  /**
+   * How long the stored token is. Shown so its presence can be confirmed
+   * without printing it: an omitted token and a wrong one look identical on
+   * screen otherwise, and the first thing anyone suspects is the token.
+   */
+  tokenLength?: number;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -638,12 +644,32 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
     const spec = WHATSAPP_TEMPLATES.find((entry) => entry.kind === kind);
     if (!spec) return fail("Choose which message to test.", { testWhatsAppKind: ["Unknown message."] });
 
+    // Values may be overridden for one send so a payload can be bisected —
+    // dropping a currency symbol, shortening a field — without touching the
+    // template mapping or waiting on a re-approval to find out what a gateway
+    // objects to.
+    const custom = String(formData.get("testWhatsAppValues") ?? "").trim();
+    let variables = spec.sample;
+    if (custom) {
+      variables = custom.split(",").map((value) => value.trim());
+      if (variables.length !== spec.variables.length) {
+        return fail(
+          `This template takes ${spec.variables.length} value(s) — ${spec.variables.join(", ")} — but ` +
+            `${variables.length} were given.`,
+          { testWhatsAppValues: [`Give ${spec.variables.length}, separated by commas.`] },
+        );
+      }
+      if (variables.some((value) => !value)) {
+        return fail("A value cannot be blank.", { testWhatsAppValues: ["Every value needs something in it."] });
+      }
+    }
+
     const config = await getCommunicationConfig();
     const live = whatsappIsLive(config);
 
     // Built first so an unmapped template or a missing sender id is reported
     // before anything is attempted, and so the screen can show it either way.
-    const request = templatePanelRequest(config, kind, to, spec.sample);
+    const request = templatePanelRequest(config, kind, to, variables);
     if ("error" in request) return fail(request.error);
 
     let outcome: string;
@@ -655,7 +681,7 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
         to,
         body: spec.example,
         kind,
-        templateVariables: spec.sample,
+        templateVariables: variables,
       });
       delivered = result.ok;
       responseStatus = result.diagnostic?.status;
@@ -673,7 +699,7 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
       entityType: "CommunicationConfig",
       entityId: "1",
       summary: `Test WhatsApp (${spec.label}) to ${to} — ${live ? (delivered ? "accepted" : "rejected") : "mock only"}`,
-      metadata: { kind, live, delivered, templateName: request.body.template_name },
+      metadata: { kind, live, delivered, templateName: request.body.template_name, custom: Boolean(custom) },
     });
 
     const payload: TestWhatsAppResult = {
@@ -684,6 +710,7 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
       body: request.body,
       responseStatus,
       responseBody,
+      tokenLength: config.whatsappApiKey?.length ?? 0,
     };
 
     // Reported as a success whenever the request could be built: the screen

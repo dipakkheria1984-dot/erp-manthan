@@ -348,6 +348,7 @@ export function WhatsAppTestCard({
                     body: Record<string, string>;
                     responseStatus?: number;
                     responseBody?: string;
+                    tokenLength?: number;
                   })
                 : null;
             return (
@@ -381,6 +382,21 @@ export function WhatsAppTestCard({
                   </SubmitButton>
                 </div>
 
+                <div className="mt-3">
+                  <Field
+                    label="Values to send (optional)"
+                    htmlFor="testWhatsAppValues"
+                    hint="Comma-separated, one per placeholder. Leave blank for the sample values. Useful for narrowing down what a gateway objects to — try it without the ₹ symbol, for instance."
+                    error={fieldError(state, "testWhatsAppValues")}
+                  >
+                    <Input
+                      id="testWhatsAppValues"
+                      name="testWhatsAppValues"
+                      placeholder="Test Student, 2, 07 Aug 2026, 25000"
+                    />
+                  </Field>
+                </div>
+
                 {result ? (
                   <div className="mt-4 space-y-3">
                     <Alert tone={result.live ? (result.delivered ? "success" : "danger") : "info"}>
@@ -388,13 +404,18 @@ export function WhatsAppTestCard({
                     </Alert>
                     <div>
                       <p className="text-xs font-medium text-muted">
-                        The request {result.live ? "sent" : "a live send would make"} — the token is not shown
+                        The request {result.live ? "sent" : "a live send would make"}
                       </p>
                       <pre className="mt-1 overflow-x-auto rounded-md border border-border bg-background p-3 text-xs">
-                        {`POST ${result.url}
+                        {`POST ${result.url}?token=${"•".repeat(8)}
 
 ${JSON.stringify(result.body, null, 2)}`}
                       </pre>
+                      <p className="mt-1 text-xs text-muted">
+                        {result.tokenLength
+                          ? `The token is attached to the URL — ${result.tokenLength} characters, masked here only for display.`
+                          : "No token is stored, so nothing was attached. Enter it above and save."}
+                      </p>
                     </div>
 
                     {result.responseStatus !== undefined ? (
