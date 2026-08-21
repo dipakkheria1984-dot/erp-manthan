@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notifyCampus } from "@/lib/campus/publisher";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -1016,6 +1017,7 @@ export async function approveApplicationAction(_prev: unknown, formData: FormDat
     });
 
     await queueWelcomeNotification(student.id);
+    await notifyCampus(student.id, "ALL", "enrollment.approved");
 
     revalidatePath("/enrollment");
     revalidatePath(`/enrollment/${applicationId}`);

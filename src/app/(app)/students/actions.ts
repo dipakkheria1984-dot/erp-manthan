@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notifyCampus } from "@/lib/campus/publisher";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getConfig } from "@/lib/config";
@@ -142,6 +143,7 @@ export async function changeStudentStatusAction(_prev: unknown, formData: FormDa
     });
 
     revalidatePath(`/students/${studentId}`);
+    await notifyCampus(studentId, "ALL", "student.status");
     revalidatePath("/students");
 
     if (exiting) {
@@ -291,6 +293,7 @@ export async function updateStudentProfileAction(
     });
 
     revalidatePath(`/students/${studentId}`);
+    await notifyCampus(studentId, "STUDENT", "student.profile");
     revalidatePath("/students");
     revalidatePath(`/enrollment/${student.applicationId}`);
     revalidatePath(`/enrollment/${student.applicationId}/edit`);
@@ -396,6 +399,7 @@ export async function addExtraChargeAction(_prev: unknown, formData: FormData): 
     });
 
     revalidatePath(`/students/${student.id}`);
+    await notifyCampus(student.id, "FINANCE", "fee.extra_charge");
     revalidatePath(`/students/${student.id}/fees/${feeAssignmentId}`);
     revalidatePath("/fees/collect");
     revalidatePath("/reports/ledger");
@@ -640,6 +644,7 @@ export async function assignSemesterFeeAction(
   );
 
     revalidatePath(`/students/${studentId}`);
+    await notifyCampus(studentId, "FINANCE", "fee.assigned");
     revalidatePath("/students");
     revalidatePath("/fees/collect");
     revalidatePath("/reports/ledger");
@@ -936,6 +941,7 @@ export async function updateFeeAssignmentAction(
     });
 
     revalidatePath(`/students/${student.id}`);
+    await notifyCampus(student.id, "FINANCE", "fee.assignment_updated");
     revalidatePath(`/students/${student.id}/fees/${assignmentId}`);
     revalidatePath("/fees/collect");
     revalidatePath("/reports/ledger");
@@ -998,6 +1004,7 @@ export async function unwaiveInstallmentAction(_prev: unknown, formData: FormDat
     });
 
     revalidatePath(`/students/${student.id}`);
+    await notifyCampus(student.id, "FINANCE", "fee.installment_restored");
     return ok(undefined, "Installment restored and late fee re-assessed against its original due date.");
   });
 }
@@ -1044,6 +1051,7 @@ export async function waiveInstallmentAction(_prev: unknown, formData: FormData)
     });
 
     revalidatePath(`/students/${installment.feeAssignment.studentId}`);
+    await notifyCampus(installment.feeAssignment.studentId, "FINANCE", "fee.installment_waived");
     return ok(undefined, "Installment waived.");
   });
 }
@@ -1298,6 +1306,7 @@ export async function grantDiscountAction(_prev: unknown, formData: FormData): P
     });
 
     revalidatePath(`/students/${student.id}`);
+    await notifyCampus(student.id, "FINANCE", "fee.discount_granted");
     revalidatePath("/reports");
     return ok(
       undefined,
@@ -1367,6 +1376,7 @@ export async function cancelDiscountAction(_prev: unknown, formData: FormData): 
     });
 
     revalidatePath(`/students/${discount.student.id}`);
+    await notifyCampus(discount.student.id, "FINANCE", "fee.discount_cancelled");
     revalidatePath("/reports");
     revalidatePath("/reports/ledger");
     return ok(
@@ -1588,6 +1598,7 @@ export async function waiveLateFeeAction(_prev: unknown, formData: FormData): Pr
     });
 
     revalidatePath(`/students/${student.id}`);
+    await notifyCampus(student.id, "FINANCE", "fee.late_fee_waived");
     revalidatePath("/fees/collect");
     revalidatePath("/reports");
     // The waiver can now be taken from the ledger itself, which is its own page
@@ -1673,6 +1684,7 @@ export async function restoreLateFeeAction(_prev: unknown, formData: FormData): 
     });
 
     revalidatePath(`/students/${student.id}`);
+    await notifyCampus(student.id, "FINANCE", "fee.late_fee_restored");
     revalidatePath("/fees/collect");
     revalidatePath("/reports");
     // Putting the charge back changes what the ledger shows as outstanding.

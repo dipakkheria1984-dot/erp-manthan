@@ -18,14 +18,6 @@ import {
 import { DEFAULT_TEMPLATE_LANGUAGE, WHATSAPP_TEMPLATES } from "@/lib/whatsapp-templates";
 import type { NotificationKind } from "@/generated/prisma/client";
 
-/** What the WhatsApp test reports back to the screen. */
-export type TestWhatsAppResult = {
-  live: boolean;
-  delivered: boolean;
-  outcome: string;
-  url: string;
-  body: Record<string, string>;
-};
 import { deliverEmail } from "@/lib/notifications";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { PRINT_COLOR_SCHEMES, PRINT_THEMES, normalizeHex } from "@/lib/print-theme";
@@ -40,6 +32,18 @@ import {
   requiredText,
   rupeeAmount,
 } from "@/lib/validation";
+
+/** What the WhatsApp test reports back to the screen. */
+export type TestWhatsAppResult = {
+  live: boolean;
+  delivered: boolean;
+  outcome: string;
+  url: string;
+  body: Record<string, string>;
+  /** Exactly what the gateway answered, so a silent non-delivery is readable. */
+  responseStatus?: number;
+  responseBody?: string;
+};
 
 /* -------------------------------------------------------------------------- */
 /* 9.1 Institute profile                                                       */
@@ -644,6 +648,8 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
 
     let outcome: string;
     let delivered = false;
+    let responseStatus: number | undefined;
+    let responseBody: string | undefined;
     if (live) {
       const result = await whatsappProviderFor(config).send({
         to,
@@ -652,6 +658,8 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
         templateVariables: spec.sample,
       });
       delivered = result.ok;
+      responseStatus = result.diagnostic?.status;
+      responseBody = result.diagnostic?.body;
       outcome = result.ok
         ? `Accepted by ${config.whatsappProvider}${result.providerMessageId ? ` — id ${result.providerMessageId}` : ""}.`
         : result.error;
@@ -674,6 +682,8 @@ export async function sendTestWhatsAppAction(_prev: unknown, formData: FormData)
       outcome,
       url: request.url,
       body: request.body,
+      responseStatus,
+      responseBody,
     };
 
     // Reported as a success whenever the request could be built: the screen

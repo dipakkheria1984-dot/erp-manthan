@@ -346,6 +346,8 @@ export function WhatsAppTestCard({
                     outcome: string;
                     url: string;
                     body: Record<string, string>;
+                    responseStatus?: number;
+                    responseBody?: string;
                   })
                 : null;
             return (
@@ -394,6 +396,22 @@ export function WhatsAppTestCard({
 ${JSON.stringify(result.body, null, 2)}`}
                       </pre>
                     </div>
+
+                    {result.responseStatus !== undefined ? (
+                      <div>
+                        <p className="text-xs font-medium text-muted">
+                          What the provider answered — HTTP {result.responseStatus}
+                        </p>
+                        <pre className="mt-1 max-h-52 overflow-auto rounded-md border border-border bg-background p-3 text-xs">
+                          {result.responseBody?.trim() || "(empty response body)"}
+                        </pre>
+                        <p className="mt-1 text-xs text-muted">
+                          If this says the message was accepted but nothing arrives, the message was queued and
+                          dropped later — check the panel&rsquo;s own delivery log and that the template is
+                          approved under this exact name and language.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </>

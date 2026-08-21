@@ -11,9 +11,19 @@ import { templateSettings } from "@/lib/whatsapp-templates";
  * file plus a dropdown value in Institute Setup, nothing more.
  */
 
+/**
+ * What the gateway actually answered, kept alongside the verdict.
+ *
+ * A provider that accepts a request and queues nothing is indistinguishable
+ * from one that worked, unless the raw answer is retained. The test screen
+ * prints this so "it said sent but nothing arrived" becomes a readable HTTP
+ * status and body rather than a mystery.
+ */
+export type SendDiagnostic = { status: number; body: string };
+
 export type SendResult =
-  | { ok: true; providerMessageId?: string }
-  | { ok: false; error: string };
+  | { ok: true; providerMessageId?: string; diagnostic?: SendDiagnostic }
+  | { ok: false; error: string; diagnostic?: SendDiagnostic };
 
 /** A file sent with an email — a receipt, a welcome kit, a report export. */
 export type Attachment = {
@@ -276,19 +286,46 @@ class TemplatePanelWhatsAppProvider implements NotificationProvider {
         body: JSON.stringify(request.body),
       });
 
+      // Read once, as text. A panel that answers with an HTML error page or an
+      // empty body would otherwise throw inside `json()` and lose the only
+      // evidence of what went wrong.
+      const raw = await response.text().catch(() => "");
+      const diagnostic: SendDiagnostic = { status: response.status, body: raw.slice(0, 1000) };
+
       if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        return { ok: false, error: `${this.name} returned ${response.status}. ${text.slice(0, 200)}`.trim() };
+        return { ok: false, error: `${this.name} returned ${response.status}. ${raw.slice(0, 200)}`.trim(), diagnostic };
       }
 
-      const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      // These panels disagree about the success envelope, so a body that
-      // explicitly says it failed is treated as a failure even on HTTP 200.
-      if (data.status === "error" || data.success === false) {
-        return { ok: false, error: String(data.message ?? "The provider rejected the message.").slice(0, 200) };
+      let data: Record<string, unknown> = {};
+      try {
+        data = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // 200 with a body that is not JSON is not an acknowledgement of
+        // anything. Panels answer this way when a route is wrong and a login
+        // page comes back with a cheerful status code.
+        return {
+          ok: false,
+          error: `${this.name} answered ${response.status} but not with JSON, so nothing was queued.`,
+          diagnostic,
+        };
       }
+
+      // Treated as failure unless the answer positively says otherwise. The
+      // opposite default — success unless it says "error" — reported messages
+      // as sent that the panel never accepted, which is worse than a false
+      // alarm because nobody goes looking.
+      const succeeded =
+        data.status === "success" ||
+        data.success === true ||
+        Boolean(data.message_id ?? data.messageId ?? data.id);
+
+      if (!succeeded) {
+        const said = String(data.message ?? data.error ?? data.status ?? "no acknowledgement");
+        return { ok: false, error: `${this.name} did not acknowledge the message: ${said}`.slice(0, 300), diagnostic };
+      }
+
       const id = (data.message_id ?? data.messageId ?? data.id) as string | undefined;
-      return { ok: true, providerMessageId: id };
+      return { ok: true, providerMessageId: id, diagnostic };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : "WhatsApp delivery failed." };
     }
