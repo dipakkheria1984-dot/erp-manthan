@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { notifyCampus } from "@/lib/campus/publisher";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertPermission } from "@/lib/auth";
@@ -187,7 +186,6 @@ export async function recordPaymentAction(_prev: unknown, formData: FormData): P
     revalidatePath("/fees/collect");
     revalidatePath("/fees/receipts");
     revalidatePath(`/students/${studentId}`);
-    await notifyCampus(studentId, "FINANCE", "fee.payment");
     if (cleared) revalidatePath(`/enrollment/${student.applicationId}`);
 
     const covered =
@@ -333,9 +331,6 @@ export async function cancelReceiptAction(_prev: unknown, formData: FormData): P
     revalidatePath("/fees/collect");
     revalidatePath("/enrollment");
     if (payment.studentId) revalidatePath(`/students/${payment.studentId}`);
-    // A voided receipt is money that never stayed with the institute, so the
-    // far end has to be told: it will not appear in the next payload at all.
-    if (payment.studentId) await notifyCampus(payment.studentId, "FINANCE", "fee.receipt_cancelled");
     if (payment.applicationId) revalidatePath(`/enrollment/${payment.applicationId}`);
     return ok(
       undefined,
