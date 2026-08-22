@@ -199,9 +199,15 @@ export async function runReminderPass(
           by: ["installmentId"],
           where: {
             kind: "FEE_OVERDUE",
+            // One reminder is two rows — email and WhatsApp — so the count is
+            // taken on a single channel. Counting both would halve the cap
+            // without anyone noticing, and would change meaning again the
+            // moment a channel was switched off.
+            channel: "EMAIL",
             installmentId: { in: overdueCandidates.map((c) => c.target.installmentId) },
           },
           _max: { createdAt: true },
+          _count: { _all: true },
         })
       : [],
   ]);
@@ -210,10 +216,20 @@ export async function runReminderPass(
   const lastOverdueAt = new Map(
     overdueLast.map((row) => [row.installmentId, row._max.createdAt] as const),
   );
+  const overdueSentCount = new Map(
+    overdueLast.map((row) => [row.installmentId, row._count._all] as const),
+  );
 
   const queue = [
     ...preDueCandidates.filter((c) => !preDueSentAlready.has(c.target.installmentId)),
     ...overdueCandidates.filter((c) => {
+      // How many have already gone, before how long ago the last one was: an
+      // installment that has had its allowance is finished with regardless of
+      // when it was last chased.
+      if (config.overdueReminderMaxCount > 0) {
+        const already = overdueSentCount.get(c.target.installmentId) ?? 0;
+        if (already >= config.overdueReminderMaxCount) return false;
+      }
       const last = lastOverdueAt.get(c.target.installmentId);
       return !last || daysBetween(startOfDay(last), today) >= config.overdueReminderIntervalDays;
     }),

@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
-import { getCommunicationConfig, getInstitute } from "@/lib/config";
+import { getCommunicationConfig, getConfig, getInstitute } from "@/lib/config";
 import { formatPaise } from "@/lib/money";
 import { formatDate } from "@/lib/dates";
 import {
@@ -15,9 +15,11 @@ import type { NotificationKind } from "@/generated/prisma/client";
 /**
  * Notification dispatch.
  *
- * Spec 3.3: every reminder goes out on Email **and** WhatsApp together — this is
- * not configurable per student or per institute. `deliver` therefore always
- * fans out to both channels and links the pair with a shared `groupKey`.
+ * Spec 3.3 had every reminder go out on Email **and** WhatsApp together, with no
+ * way to choose. Both are still on by default and the pair still shares a
+ * `groupKey`, but each channel can now be switched off in Setup — a channel that
+ * charges per message, or is half-configured, has to be stoppable without
+ * tearing out its credentials. What cannot be done is choosing per student.
  *
  * Failures are recorded on the NotificationLog row rather than thrown, so a
  * bounced address never rolls back the business action that triggered it.
@@ -33,11 +35,22 @@ type Recipient = { email: string | null; phone: string | null };
  * configuration for each one is a round trip per message that buys nothing —
  * the settings cannot change mid-pass.
  */
-export type Channels = { email: NotificationProvider; whatsapp: NotificationProvider };
+export type Channels = {
+  email: NotificationProvider;
+  whatsapp: NotificationProvider;
+  /** Whether each channel is switched on in Setup. */
+  emailEnabled: boolean;
+  whatsappEnabled: boolean;
+};
 
 export async function resolveChannels(): Promise<Channels> {
-  const config = await getCommunicationConfig();
-  return { email: emailProviderFor(config), whatsapp: whatsappProviderFor(config) };
+  const [config, institute] = await Promise.all([getCommunicationConfig(), getConfig()]);
+  return {
+    email: emailProviderFor(config),
+    whatsapp: whatsappProviderFor(config),
+    emailEnabled: institute.emailNotificationsEnabled,
+    whatsappEnabled: institute.whatsappNotificationsEnabled,
+  };
 }
 
 type DeliverInput = {
@@ -59,12 +72,19 @@ type DeliverInput = {
 };
 
 export async function deliver(input: DeliverInput): Promise<{ sent: number; failed: number }> {
-  const { email, whatsapp } = input.channels ?? (await resolveChannels());
+  const { email, whatsapp, emailEnabled, whatsappEnabled } = input.channels ?? (await resolveChannels());
   const groupKey = randomUUID();
 
+  // A channel switched off in Setup is not attempted and leaves no log row: it
+  // was never asked to carry this message, so recording it as failed would put
+  // an institute's own decision on the failures list it is meant to act on.
   const targets = [
-    { channel: "EMAIL" as const, provider: email, to: input.recipient.email ?? "" },
-    { channel: "WHATSAPP" as const, provider: whatsapp, to: input.recipient.phone ?? "" },
+    ...(emailEnabled
+      ? [{ channel: "EMAIL" as const, provider: email, to: input.recipient.email ?? "" }]
+      : []),
+    ...(whatsappEnabled
+      ? [{ channel: "WHATSAPP" as const, provider: whatsapp, to: input.recipient.phone ?? "" }]
+      : []),
   ];
 
   let sent = 0;

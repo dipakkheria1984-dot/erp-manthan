@@ -229,6 +229,27 @@ model InstituteConfig {
   preDueReminderDays          Int @default(7)
   overdueReminderIntervalDays Int @default(3)
 
+  /// Stop after this many overdue reminders for one installment. 0 is no limit,
+  /// which is how it behaved before this existed.
+  ///
+  /// The interval above says how often; this says how many. Without it an
+  /// installment nobody ever pays is chased forever — free by email, but a
+  /// charge per message on WhatsApp and an irritation to the family either way.
+  overdueReminderMaxCount Int @default(0)
+
+  /// Which channels automated notifications go out on.
+  ///
+  /// Spec 3.3 fixed both on, on the grounds that a reminder should never
+  /// silently reach only half its audience. That holds until a channel costs
+  /// money per message or is being set up, at which point an institute needs to
+  /// be able to stop it without uninstalling its credentials — so it is a
+  /// setting, and both default to on.
+  ///
+  /// These govern the automatic fan-out only. A member of staff pressing
+  /// "Email" on a receipt or a ledger is an explicit act and is not affected.
+  emailNotificationsEnabled    Boolean @default(true)
+  whatsappNotificationsEnabled Boolean @default(true)
+
   // Online admissions
   /// Publishes the public admission form at /apply. Off by default: turning it
   /// on opens a route that anyone with the address can start an application
@@ -873,6 +894,7 @@ model Student {
   promotionEntries PromotionRunStudent[]
   notifications    NotificationLog[]
   courseChanges    CourseChange[]
+  campusSync       CampusSyncOutbox[]
 
   @@index([batchId])
   @@index([courseId])
@@ -1325,4 +1347,57 @@ model TermsVersion {
 
   @@unique([document, version])
   @@index([document, effectiveFrom])
+}
+
+// ---------------------------------------------------------------------------
+// Manthan Campus — outbound synchronisation
+// ---------------------------------------------------------------------------
+
+/// What a queued change is about.
+enum CampusSyncTopic {
+  /// Identity, batch, course, semester and enrolment status.
+  STUDENT
+  /// Fee lines, ledger transactions and the balance summary.
+  FINANCE
+}
+
+enum CampusSyncStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+/// Outbound queue for Manthan Campus, the attendance & academic application.
+///
+/// A **coalescing** queue: exactly one row per student per topic, flipped back
+/// to PENDING whenever something changes. That is deliberate. The publisher
+/// builds each delivery from the student's *current* state rather than from a
+/// stored diff, so a student who changes five times before the queue drains
+/// needs one delivery, not five — and a retry can never apply stale data,
+/// because there is no stale data to apply.
+///
+/// Queuing is best-effort and never blocks the office: a failure to enqueue is
+/// logged and swallowed, and the next change to that student re-queues them.
+model CampusSyncOutbox {
+  id        String           @id @default(cuid())
+  studentId String
+  topic     CampusSyncTopic
+  status    CampusSyncStatus @default(PENDING)
+
+  /// What put the student in the queue — "fee.payment", "student.status" —
+  /// so an operator looking at a stuck row can see what it is waiting on.
+  reason String?
+
+  attempts      Int       @default(0)
+  lastError     String?
+  nextAttemptAt DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, topic])
+  @@index([status, nextAttemptAt])
 }

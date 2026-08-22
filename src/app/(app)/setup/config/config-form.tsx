@@ -139,7 +139,39 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
             </div>
           </Card>
 
-          <Card title="Reminder cadence" description="Email and WhatsApp are always sent together for every reminder.">
+          <Card
+            title="Fee reminders"
+            description="Which channels automated reminders go out on, how often, and how many times."
+          >
+            <div className="mb-4 flex flex-wrap gap-6">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="emailNotificationsEnabled"
+                  name="emailNotificationsEnabled"
+                  defaultChecked={config.emailNotificationsEnabled}
+                />
+                <label htmlFor="emailNotificationsEnabled" className="text-sm">
+                  Send by email
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="whatsappNotificationsEnabled"
+                  name="whatsappNotificationsEnabled"
+                  defaultChecked={config.whatsappNotificationsEnabled}
+                />
+                <label htmlFor="whatsappNotificationsEnabled" className="text-sm">
+                  Send by WhatsApp
+                </label>
+              </div>
+            </div>
+            <div className="mb-4">
+              <Alert tone="info">
+                These govern every automated notification — fee reminders, welcome messages, application updates.
+                A member of staff pressing &ldquo;Email&rdquo; on a receipt or a ledger is unaffected. Turning a
+                channel off leaves its settings and credentials in place.
+              </Alert>
+            </div>
             <FormGrid cols={2}>
               <Field label="Pre-due reminder (days before)" htmlFor="preDueReminderDays" required error={fieldError(state, "preDueReminderDays")}>
                 <Input id="preDueReminderDays" name="preDueReminderDays" type="number" min={0} defaultValue={config.preDueReminderDays} required />
@@ -157,6 +189,23 @@ export function ConfigForm({ config }: { config: InstituteConfig }) {
                   type="number"
                   min={1}
                   defaultValue={config.overdueReminderIntervalDays}
+                  required
+                />
+              </Field>
+              <Field
+                label="Maximum overdue reminders"
+                htmlFor="overdueReminderMaxCount"
+                required
+                hint="Stop chasing one installment after this many. 0 means keep going until it is paid — which is how it behaved before this setting existed."
+                error={fieldError(state, "overdueReminderMaxCount")}
+              >
+                <Input
+                  id="overdueReminderMaxCount"
+                  name="overdueReminderMaxCount"
+                  type="number"
+                  min={0}
+                  max={100}
+                  defaultValue={config.overdueReminderMaxCount}
                   required
                 />
               </Field>
