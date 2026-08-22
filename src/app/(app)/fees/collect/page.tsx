@@ -255,7 +255,11 @@ export default async function CollectFeesPage({ searchParams }: { searchParams: 
               )}
             </Card>
 
-            {payable.length > 0 && (student.status === "ACTIVE" || student.status === "PASSED") ? (
+            {/* Rendered whether or not anything is payable: clearing the last
+                installment used to unmount the form and take the receipt link
+                with it, at the moment the cashier needed to print it. The form
+                itself says when there is nothing left to collect. */}
+            {student.status === "ACTIVE" || student.status === "PASSED" ? (
               <Card
                 title="Record a payment"
                 description="Enter the amount received. It is applied to the oldest due installment first and carries on to the next, so one payment can clear several installments."

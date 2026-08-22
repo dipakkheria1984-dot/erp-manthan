@@ -35,6 +35,18 @@ const toPaise = (value: string): number => {
   return Number.isFinite(n) ? rupeesToPaise(n) : Number.NaN;
 };
 
+function ReceiptNotice({ receiptNo }: { receiptNo: string }) {
+  return (
+    <Alert tone="success" title={`Receipt ${receiptNo} generated`}>
+      <a href={`/api/receipts/${receiptNo}`} target="_blank" rel="noreferrer" className="underline">
+        Open the printable receipt
+      </a>{" "}
+      — it lists every installment the amount was applied to, and the institute&apos;s terms &amp; conditions are
+      printed at the bottom.
+    </Alert>
+  );
+}
+
 export function PaymentForm({
   studentId,
   installments,
@@ -45,6 +57,39 @@ export function PaymentForm({
   const totalOutstanding = installments.reduce((sum, row) => sum + row.outstandingPaise, 0);
   const [amount, setAmount] = useState(String(paiseToRupees(totalOutstanding)));
   const [receipt, setReceipt] = useState<string | null>(null);
+
+  /**
+   * Re-seed the amount whenever what the student owes changes.
+   *
+   * `useState` seeds once, so after a payment was recorded the page revalidated
+   * with a smaller balance while the box still held the sum just taken — shown
+   * allocated against the *next* installments, with the button still armed.
+   * Pressing it again took the money twice.
+   *
+   * Adjusting state during render is React's own answer to a value that has to
+   * follow a prop; the alternative, an effect, would paint the stale figure
+   * first and correct it after, which is the flicker this is meant to remove.
+   */
+  const [seededFor, setSeededFor] = useState(totalOutstanding);
+  if (seededFor !== totalOutstanding) {
+    setSeededFor(totalOutstanding);
+    setAmount(String(paiseToRupees(totalOutstanding)));
+  }
+
+  // Nothing left to collect. The component stays mounted rather than the page
+  // dropping it, so the receipt just generated is still on screen to be
+  // printed — it used to vanish at the very moment the last installment was
+  // cleared, which is when it is most wanted.
+  if (installments.length === 0) {
+    return (
+      <div className="space-y-4">
+        {receipt ? <ReceiptNotice receiptNo={receipt} /> : null}
+        <Alert tone="success" title="Nothing outstanding">
+          Every installment on this student&apos;s account is settled.
+        </Alert>
+      </div>
+    );
+  }
 
   const entered = toPaise(amount);
   const valid = Number.isFinite(entered) && entered > 0;
@@ -57,6 +102,10 @@ export function PaymentForm({
   return (
     <ActionForm
       action={recordPaymentAction}
+      // Clears the reference and remarks boxes. Without it the last payment's
+      // UTR or cheque number sat there waiting to be attached to the next
+      // receipt, describing money that had nothing to do with it.
+      resetOnSuccess
       onSuccess={(state) => {
         const data = state.ok ? (state.data as { receiptNo: string }) : undefined;
         setReceipt(data?.receiptNo ?? null);
@@ -64,15 +113,7 @@ export function PaymentForm({
     >
       {(state) => (
         <>
-          {receipt ? (
-            <Alert tone="success" title={`Receipt ${receipt} generated`}>
-              <a href={`/api/receipts/${receipt}`} target="_blank" rel="noreferrer" className="underline">
-                Open the printable receipt
-              </a>{" "}
-              — it lists every installment the amount was applied to, and the institute&apos;s terms &amp; conditions
-              are printed at the bottom.
-            </Alert>
-          ) : null}
+          {receipt ? <ReceiptNotice receiptNo={receipt} /> : null}
 
           <input type="hidden" name="studentId" value={studentId} />
 
