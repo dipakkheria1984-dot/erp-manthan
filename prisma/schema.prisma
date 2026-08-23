@@ -1254,6 +1254,23 @@ model NotificationLog {
   /// Set when a failure has been surfaced to Admin (spec 3.3).
   acknowledgedAt    DateTime?
 
+  /// Values for this kind's approved WhatsApp template, in the order
+  /// src/lib/whatsapp-templates.ts declares. Kept on the row so a retry sends
+  /// the message that was meant to go out, rather than one recomputed from
+  /// data that has moved on since.
+  templateVariables String[]
+
+  /// Deliveries attempted, first send included.
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+  /// When the retry sweep should try this row again. Null once it is delivered,
+  /// out of attempts, or not worth retrying — see MAX_DELIVERY_ATTEMPTS.
+  nextAttemptAt DateTime?
+  /// False when the message cannot be rebuilt for a resend: an email whose
+  /// point was an attachment the log deliberately does not keep a copy of.
+  /// Such a row is re-sent from the screen that raised it, not from here.
+  retryable     Boolean   @default(true)
+
   sentAt    DateTime?
   createdAt DateTime  @default(now())
 
@@ -1262,6 +1279,7 @@ model NotificationLog {
   installment Installment? @relation(fields: [installmentId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
+  @@index([status, nextAttemptAt])
   @@index([installmentId, kind, createdAt])
   @@index([studentId])
   @@index([groupKey])

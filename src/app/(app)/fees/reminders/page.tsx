@@ -3,15 +3,37 @@ import { requirePermission } from "@/lib/auth";
 import { getConfig, getCommunicationConfig } from "@/lib/config";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/dates";
+import { MAX_DELIVERY_ATTEMPTS } from "@/lib/notifications";
+import { countAwaitingRetry } from "@/lib/notification-retry";
 import { Alert, Badge, Card, PageHeader, StatTile, TableWrap, Td, Th, Tr } from "@/components/ui";
-import { RecalculateButton, RunRemindersButton } from "./reminder-controls";
+import { RecalculateButton, RetryAllButton, RetryOneButton, RunRemindersButton } from "./reminder-controls";
 
 export const metadata = { title: "Reminders" };
+
+/**
+ * What happens to a failed delivery next, in the terms the office cares about.
+ *
+ * The distinction that matters on this list is between a message still on its
+ * way and one that has stopped — and, when it has stopped, whether pressing
+ * Retry would achieve anything at all.
+ */
+function retryNote(log: {
+  nextAttemptAt: Date | null;
+  retryable: boolean;
+  recipient: string;
+}): string {
+  if (log.nextAttemptAt) return `next try ${formatDateTime(log.nextAttemptAt)}`;
+  if (!log.recipient) return "no address on file";
+  // An email whose point was its attachment: the log kept the covering note but
+  // not the document, so it goes again from the screen that produced it.
+  if (!log.retryable) return "resend from the student's screen";
+  return "no automatic tries left";
+}
 
 export default async function RemindersPage() {
   await requirePermission(PERMISSIONS.INSTITUTE_MANAGE);
 
-  const [config, comms, lastRun, failures, recent, failureCount] = await Promise.all([
+  const [config, comms, lastRun, failures, recent, failureCount, awaitingRetry] = await Promise.all([
     getConfig(),
     getCommunicationConfig(),
     prisma.reminderRun.findFirst({ orderBy: { runAt: "desc" } }),
@@ -27,6 +49,7 @@ export default async function RemindersPage() {
       take: 40,
     }),
     prisma.notificationLog.count({ where: { status: "FAILED" } }),
+    countAwaitingRetry(),
   ]);
 
   const usingMock = comms.emailProvider === "mock" || (comms.whatsappProvider ?? "mock") === "mock";
@@ -63,7 +86,13 @@ export default async function RemindersPage() {
             label="Delivery failures"
             value={failureCount}
             tone={failureCount > 0 ? "danger" : "success"}
-            hint={failureCount > 0 ? "Needs attention" : "All delivered"}
+            hint={
+              awaitingRetry > 0
+                ? `${awaitingRetry} waiting on an automatic retry`
+                : failureCount > 0
+                  ? "Needs attention"
+                  : "All delivered"
+            }
           />
         </div>
 
@@ -72,17 +101,26 @@ export default async function RemindersPage() {
           description="Point a scheduler at the job endpoint once a day, or run it by hand with the button above."
         >
           <pre className="overflow-x-auto rounded-md border border-border bg-background p-3 text-xs">
-            {`curl -X POST -H "x-job-secret: $JOB_SECRET" https://your-host/api/jobs/reminders`}
+            {`curl -X POST -H "x-job-secret: $JOB_SECRET" https://your-host/api/jobs/reminders\ncurl -X POST -H "x-job-secret: $JOB_SECRET" https://your-host/api/jobs/notification-retry`}
           </pre>
           <p className="mt-2 text-sm text-muted">
             Locally: <code className="font-mono">npm run job:reminders</code>. The pass is idempotent — a pre-due
             reminder goes out once per installment and an overdue reminder only after the configured interval has
             elapsed, so running it more than once a day is harmless.
           </p>
+          <p className="mt-2 text-sm text-muted">
+            The second endpoint is the retry sweep, and wants to run every half hour rather than daily — a message
+            that failed at 3am is owed its second try at 3.30, not tomorrow. It does nothing at all when there is
+            nothing outstanding.
+          </p>
         </Card>
 
         {failures.length > 0 ? (
-          <Card title="Failed deliveries" description="Bounced emails and invalid WhatsApp numbers, flagged for Admin.">
+          <Card
+            title="Failed deliveries"
+            description={`Bounced emails and refused WhatsApp messages, flagged for Admin. Each is tried again automatically after 30 minutes, up to ${MAX_DELIVERY_ATTEMPTS} attempts in all — retry sooner if you have just put right whatever was wrong.`}
+            actions={<RetryAllButton />}
+          >
             <TableWrap>
               <thead>
                 <tr>
@@ -91,6 +129,10 @@ export default async function RemindersPage() {
                   <Th>Channel</Th>
                   <Th>Recipient</Th>
                   <Th>Error</Th>
+                  <Th>Tries</Th>
+                  <Th>
+                    <span className="sr-only">Retry</span>
+                  </Th>
                 </tr>
               </thead>
               <tbody>
@@ -103,6 +145,13 @@ export default async function RemindersPage() {
                     </Td>
                     <Td className="font-mono text-xs">{log.recipient || "(none on file)"}</Td>
                     <Td className="text-danger">{log.error}</Td>
+                    <Td className="whitespace-nowrap text-xs text-muted">
+                      {log.attempts} of {MAX_DELIVERY_ATTEMPTS}
+                      <span className="block">{retryNote(log)}</span>
+                    </Td>
+                    <Td>
+                      {log.retryable && log.recipient ? <RetryOneButton logId={log.id} /> : null}
+                    </Td>
                   </Tr>
                 ))}
               </tbody>

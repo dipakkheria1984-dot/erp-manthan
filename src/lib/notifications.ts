@@ -10,7 +10,7 @@ import {
   type Attachment,
   type NotificationProvider,
 } from "@/lib/notification-providers";
-import type { NotificationKind } from "@/generated/prisma/client";
+import type { NotificationChannel, NotificationKind } from "@/generated/prisma/client";
 
 /**
  * Notification dispatch.
@@ -71,8 +71,119 @@ type DeliverInput = {
   templateVariables?: string[];
 };
 
+/* -------------------------------------------------------------------------- */
+/* Retry policy                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How many times one message goes on the wire before it is left alone.
+ *
+ * The first send counts, so this is one attempt plus two retries. A gateway
+ * that answers `{"message":"Server Error"}` is usually itself again within the
+ * hour and a second look costs nothing; one still refusing on the third attempt
+ * is refusing for a reason repetition will not fix, and the row belongs on the
+ * failures list in front of a person instead.
+ */
+export const MAX_DELIVERY_ATTEMPTS = 3;
+
+/** How long a failed message waits before the sweep tries it again. */
+export const RETRY_AFTER_MS = 30 * 60 * 1000;
+
+/**
+ * When the retry sweep should look at a failed row again, or null to stop.
+ *
+ * A row with nothing in `recipient` is never rescheduled: there is no address,
+ * so every retry fails in precisely the same way while burying the rows that
+ * could still be delivered.
+ */
+export function nextAttemptAfterFailure(
+  log: { attempts: number; recipient: string; retryable: boolean },
+  now: Date,
+): Date | null {
+  if (!log.retryable || !log.recipient) return null;
+  if (log.attempts >= MAX_DELIVERY_ATTEMPTS) return null;
+  return new Date(now.getTime() + RETRY_AFTER_MS);
+}
+
+/** What an attempt needs off the log row; a whole row satisfies it. */
+export type DeliverableLog = {
+  id: string;
+  kind: NotificationKind;
+  channel: NotificationChannel;
+  recipient: string;
+  subject: string | null;
+  body: string;
+  templateVariables: string[];
+  attempts: number;
+  retryable: boolean;
+};
+
+/**
+ * Put one logged message on the wire and record what came back.
+ *
+ * The single place a send is attempted, so the first try and every retry are
+ * the same operation with the same bookkeeping. A retry re-sends what the log
+ * says was meant to go out rather than rebuilding the message from data that
+ * has moved on in the meantime — the student is owed the message that failed,
+ * not a fresh one describing a different balance.
+ *
+ * Nothing here consults the schedule: whether an attempt is due is the caller's
+ * question, and a member of staff pressing Retry has answered it themselves.
+ * What is decided here is only whether another *automatic* attempt follows.
+ */
+export async function attemptDelivery(
+  log: DeliverableLog,
+  channels: Channels,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const provider = log.channel === "EMAIL" ? channels.email : channels.whatsapp;
+  const attempts = log.attempts + 1;
+
+  const result = await provider.send({
+    to: log.recipient,
+    subject: log.subject ?? undefined,
+    body: log.body,
+    kind: log.kind,
+    templateVariables: log.templateVariables.length > 0 ? log.templateVariables : undefined,
+  });
+  const now = new Date();
+
+  if (result.ok) {
+    await prisma.notificationLog.update({
+      where: { id: log.id },
+      data: {
+        status: "SENT",
+        sentAt: now,
+        attempts,
+        lastAttemptAt: now,
+        // Cleared together: a row that got through on the second try should not
+        // sit there showing the first try's error beside a green badge.
+        nextAttemptAt: null,
+        error: null,
+        provider: provider.name,
+        providerMessageId: result.providerMessageId ?? null,
+      },
+    });
+    return { ok: true };
+  }
+
+  await prisma.notificationLog.update({
+    where: { id: log.id },
+    data: {
+      // Flagged to Admin on the Reminders screen (spec 3.3).
+      status: "FAILED",
+      attempts,
+      lastAttemptAt: now,
+      nextAttemptAt: nextAttemptAfterFailure({ ...log, attempts }, now),
+      error: result.error,
+      provider: provider.name,
+    },
+  });
+  return { ok: false, error: result.error };
+}
+
 export async function deliver(input: DeliverInput): Promise<{ sent: number; failed: number }> {
-  const { email, whatsapp, emailEnabled, whatsappEnabled } = input.channels ?? (await resolveChannels());
+  const channels = input.channels ?? (await resolveChannels());
+  const { email, whatsapp, emailEnabled, whatsappEnabled } = channels;
   const groupKey = randomUUID();
 
   // A channel switched off in Setup is not attempted and leaves no log row: it
@@ -102,32 +213,17 @@ export async function deliver(input: DeliverInput): Promise<{ sent: number; fail
         recipient: target.to,
         subject: input.subject,
         body: input.body,
+        // Stored, not merely passed through: without them a WhatsApp retry has
+        // nothing to send, because the gateway takes only the template's
+        // variables and never the body.
+        templateVariables: input.templateVariables ?? [],
         provider: target.provider.name,
       },
     });
 
-    const result = await target.provider.send({
-      to: target.to,
-      subject: input.subject,
-      body: input.body,
-      kind: input.kind,
-      templateVariables: input.templateVariables,
-    });
-
-    if (result.ok) {
-      sent += 1;
-      await prisma.notificationLog.update({
-        where: { id: log.id },
-        data: { status: "SENT", sentAt: new Date(), providerMessageId: result.providerMessageId ?? null },
-      });
-    } else {
-      failed += 1;
-      // Flagged to Admin on the Reminders screen (spec 3.3).
-      await prisma.notificationLog.update({
-        where: { id: log.id },
-        data: { status: "FAILED", error: result.error },
-      });
-    }
+    const result = await attemptDelivery(log, channels);
+    if (result.ok) sent += 1;
+    else failed += 1;
   }
 
   return { sent, failed };
@@ -155,6 +251,7 @@ export async function deliverEmail(input: {
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const config = await getCommunicationConfig();
   const provider = emailProviderFor(config);
+  const attachments = input.attachments ?? [];
 
   const log = await prisma.notificationLog.create({
     data: {
@@ -166,9 +263,14 @@ export async function deliverEmail(input: {
       subject: input.subject,
       // The attachment is not stored — it is rebuilt from live data on demand —
       // so the log notes what went out rather than pretending to hold a copy.
-      body: input.attachments?.length
-        ? `${input.body}\n\n[Attached: ${input.attachments.map((a) => a.filename).join(", ")}]`
+      body: attachments.length
+        ? `${input.body}\n\n[Attached: ${attachments.map((a) => a.filename).join(", ")}]`
         : input.body,
+      // Which is also why this one cannot be retried from the log: resending it
+      // without its attachment would deliver a covering note for a document
+      // that never arrived, and count as a success. It goes again by pressing
+      // Email a second time on the screen that raised it.
+      retryable: attachments.length === 0,
       provider: provider.name,
     },
   });
@@ -179,12 +281,25 @@ export async function deliverEmail(input: {
     body: input.body,
     attachments: input.attachments,
   });
+  const now = new Date();
 
   await prisma.notificationLog.update({
     where: { id: log.id },
     data: result.ok
-      ? { status: "SENT", sentAt: new Date(), providerMessageId: result.providerMessageId ?? null }
-      : { status: "FAILED", error: result.error },
+      ? {
+          status: "SENT",
+          sentAt: now,
+          attempts: 1,
+          lastAttemptAt: now,
+          providerMessageId: result.providerMessageId ?? null,
+        }
+      : {
+          status: "FAILED",
+          attempts: 1,
+          lastAttemptAt: now,
+          nextAttemptAt: nextAttemptAfterFailure({ ...log, attempts: 1 }, now),
+          error: result.error,
+        },
   });
 
   return result.ok ? { ok: true } : { ok: false, error: result.error };
