@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Caveat:wght@500;700&display=swap">
+  <style>
+    body { margin: 0; background: #FFFFFF; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; }
+    a { color: #ED1C24; } a:hover { color: #B01018; }
+    .hand { font-family: 'Caveat','Bradley Hand',cursive; }
+    .box { border: 2px solid #262220; background: repeating-linear-gradient(45deg, #F0EEEC, #F0EEEC 6px, #E4E1DE 6px, #E4E1DE 12px); }
+    .bar { background: #262220; height: 14px; }
+    .bar-l { background: #C9C5C1; height: 10px; }
+  </style>
+</helmet>
+<div style="width: 540px; height: 675px; background: #FFFFFF; color: #262220; display: flex; flex-direction: column; padding: 30px; overflow: hidden;">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 2px solid #262220;">
+    <span style="font-size: 15px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;">Direction B</span>
+    <span class="hand" style="font-size: 22px; color: #ED1C24;">&#34;Studio Floor&#34;</span>
+  </div>
+
+  <div class="box" style="height: 250px; margin-top: 18px; display: flex; align-items: center; justify-content: center;">
+    <span class="hand" style="font-size: 22px; color: #6B6560;">documentary photo — hands, machines, mess</span>
+  </div>
+
+  <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 9px;">
+    <div class="bar" style="width: 72%;"></div>
+    <div class="bar" style="width: 46%;"></div>
+    <div class="bar-l" style="width: 90%; margin-top: 8px;"></div>
+    <div class="bar-l" style="width: 84%;"></div>
+    <div class="bar-l" style="width: 55%;"></div>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <p class="hand" style="margin: 0 0 14px; font-size: 21px; line-height: 1.35; color: #6B6560;">Black &amp; white reportage. Tiny type in one corner, photo does all the work. Warm, honest, zero swagger — but it lives or dies on photography you do not have yet.</p>
+
+  <div style="display: flex; gap: 8px; align-items: center; border-top: 2px solid #262220; padding-top: 12px;">
+    <div style="width: 14px; height: 14px; background: #ED1C24;"></div>
+    <span style="font-size: 14px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #6B6560;">Red only on the logo</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":540,"height":675}}'>
+class Component extends DCLogic {}
+</script>
+</body>
+</html>

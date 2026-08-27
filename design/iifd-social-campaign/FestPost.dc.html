@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #16110F; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A317; text-decoration: none; }
+    a:hover { color: #ED1C24; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .lbl { font-size: 19px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+  </style>
+</helmet>
+<div style="width: 1080px; height: 1080px; background: #16110F; color: #F4EFE7; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 48px 56px 0; display: flex; justify-content: space-between; align-items: baseline;">
+    <span class="lbl" style="color: {{accent2}};">#CTFW2K26</span>
+    <span class="lbl" style="color: rgba(244,239,231,0.45);">Calcutta Times Fashion Week</span>
+  </div>
+
+  <div style="padding: 30px 56px 0; display: flex; justify-content: center;">
+    <img src="runway.jpg" alt="IIFD student collections on the Calcutta Times Fashion Week runway" style="width: 640px; height: 470px; object-fit: cover; object-position: 50% 52%; border-radius: 320px 320px 0 0; display: block;">
+  </div>
+
+  <div style="padding: 44px 56px 0;">
+    <h1 class="disp" style="margin: 0; font-size: 88px; line-height: 0.96; font-weight: 700; letter-spacing: -0.025em;">Our students<br><span style="color: {{accent2}};">dressed the ramp.</span></h1>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <div style="background: {{accent}}; color: #FFFFFF; padding: 26px 56px; display: flex; justify-content: space-between; align-items: center;">
+    <span style="font-size: 24px; font-weight: 600;">You could be in the next batch</span>
+    <span class="lbl" style="font-weight: 700;">iifdkolkata.in</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":1080,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>

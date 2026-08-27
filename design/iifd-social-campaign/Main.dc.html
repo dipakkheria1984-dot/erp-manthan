@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #16110F; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A317; text-decoration: none; }
+    a:hover { color: #ED1C24; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .lbl { font-size: 19px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+  </style>
+</helmet>
+<div style="width: 1080px; height: 1350px; background: #16110F; color: #F4EFE7; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 56px 64px 0;">
+    <div class="lbl" style="display: flex; justify-content: space-between; align-items: baseline; color: rgba(244,239,231,0.55);">
+      <span>IIFD Kolkata · Salt Lake</span>
+      <span>Since 2004</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; margin-top: 20px;">
+      <div style="flex-grow: 1; height: 1px; background: rgba(244,239,231,0.25);"></div>
+      <div style="width: 8px; height: 8px; background: {{accent2}}; transform: rotate(45deg);"></div>
+      <div style="flex-grow: 1; height: 1px; background: rgba(244,239,231,0.25);"></div>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: stretch; gap: 40px; padding-left: 64px; min-height: 0;">
+
+    <div style="width: 546px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: center; padding: 34px 0;">
+      <h1 class="disp" style="margin: 0; font-size: 98px; line-height: 0.94; font-weight: 700; letter-spacing: -0.02em;">This city<br>makes<br><span style="color: {{accent2}};">designers.</span></h1>
+      <div style="width: 88px; height: 5px; background: {{accent}}; margin: 38px 0;"></div>
+      <p style="margin: 0; font-size: 27px; line-height: 1.56; color: rgba(244,239,231,0.76); text-wrap: pretty;">Fashion, interior, textile and graphic design — taught in the city that has been making things for three hundred years. Clay in Kumartuli. Jamdani on the loom. Studios in Salt Lake, for twenty years now.</p>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin-top: 42px; font-size: 22px; font-weight: 600; letter-spacing: 0.06em;">
+        <div>Fashion Design</div>
+        <div>Interior Design</div>
+        <div>Textile Design</div>
+        <div>Graphic Design</div>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; align-items: flex-end; min-width: 0;">
+      <img src="hero.jpg" alt="IIFD student design on the Calcutta Times Fashion Week runway" style="width: 100%; height: 96%; object-fit: cover; object-position: 50% 20%; border-radius: 215px 215px 0 0; display: block;">
+    </div>
+
+  </div>
+
+  <div style="background: {{accent}}; color: #FFFFFF; padding: 28px 64px; display: flex; justify-content: space-between; align-items: center;">
+    <span class="disp" style="font-size: 38px; font-weight: 700; letter-spacing: -0.01em;">Admissions open for 2027</span>
+    <span class="lbl" style="font-weight: 700;">iifdkolkata.in</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":1080,"height":1350}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>

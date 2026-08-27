@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #0C0908; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A317; text-decoration: none; }
+    a:hover { color: #ED1C24; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .tile { height: 380px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
+    .tile-t { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; font-size: 42px; line-height: 0.98; font-weight: 700; letter-spacing: -0.02em; }
+    .tile-k { font-size: 14px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; }
+    .ph { height: 380px; overflow: hidden; }
+    .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  </style>
+</helmet>
+<div style="width: 1080px; height: 1560px; background: #0C0908; color: #F4EFE7; display: flex; flex-direction: column; overflow: hidden; padding: 52px;">
+
+  <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 24px; border-bottom: 1px solid rgba(244,239,231,0.2);">
+    <div>
+      <div class="disp" style="font-size: 44px; line-height: 1; font-weight: 700;">@iifdkolkata</div>
+      <div style="font-size: 21px; color: rgba(244,239,231,0.6); margin-top: 10px;">First three weeks — how the feed will look</div>
+    </div>
+    <div class="disp" style="font-size: 26px; font-style: italic; color: {{accent2}};">This city makes designers</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 24px;">
+
+    <div class="tile" style="background: #16110F;">
+      <div class="tile-k" style="color: rgba(244,239,231,0.45);">Week 1 · Launch</div>
+      <div class="tile-t">This city<br>makes<br><span style="color: {{accent2}};">designers.</span></div>
+    </div>
+    <div class="ph"><img src="hero.jpg" alt="Runway look" style="object-position: 50% 18%;"></div>
+    <div class="tile" style="background: #F4EFE7; color: #16110F;">
+      <div class="tile-k" style="color: rgba(22,17,15,0.45);">Carousel 1</div>
+      <div class="tile-t">Kolkata<br>already makes<br>things.</div>
+    </div>
+
+    <div class="tile" style="background: {{accent}}; color: #FFFFFF;">
+      <div class="tile-k" style="color: rgba(255,255,255,0.72);">Carousel 2</div>
+      <div class="tile-t" style="font-size: 86px;">99%</div>
+    </div>
+    <div class="ph"><img src="ajrakh.jpg" alt="Textile detail" style="object-position: 50% 40%;"></div>
+    <div class="tile" style="background: #16110F;">
+      <div class="tile-k" style="color: rgba(244,239,231,0.45);">Reel</div>
+      <div class="tile-t">60 seconds<br>at a <span style="color: {{accent2}};">loom</span></div>
+    </div>
+
+    <div class="tile" style="background: #F4EFE7; color: #16110F;">
+      <div class="tile-k" style="color: rgba(22,17,15,0.45);">Week 3 · Apply</div>
+      <div class="tile-t">No entrance<br>exam.</div>
+    </div>
+    <div class="ph"><img src="runway.jpg" alt="Fashion week runway" style="object-position: 50% 50%;"></div>
+    <div class="tile" style="background: {{accent2}}; color: #16110F;">
+      <div class="tile-k" style="color: rgba(22,17,15,0.55);">Closing</div>
+      <div class="tile-t">Apply for<br>2027</div>
+    </div>
+
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border-top: 1px solid rgba(244,239,231,0.2); padding-top: 22px; font-size: 20px; line-height: 1.45; color: rgba(244,239,231,0.62);">
+    <div><strong style="color: #F4EFE7;">Week 1</strong> — claim the city</div>
+    <div><strong style="color: #F4EFE7;">Week 2</strong> — show the numbers and the studio</div>
+    <div><strong style="color: #F4EFE7;">Week 3</strong> — book the free test</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":1080,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>

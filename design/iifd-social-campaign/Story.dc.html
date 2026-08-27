@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #16110F; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A317; text-decoration: none; }
+    a:hover { color: #ED1C24; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .lbl { font-size: 20px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+    .fact { display: flex; gap: 26px; align-items: baseline; padding: 18px 0; border-top: 1px solid rgba(244,239,231,0.18); }
+    .fact-k { width: 205px; flex-shrink: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    .fact-v { font-size: 25px; line-height: 1.44; }
+  </style>
+</helmet>
+<div style="width: 1080px; height: 1920px; background: #16110F; color: #F4EFE7; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="height: 270px; flex-shrink: 0;"></div>
+
+  <div style="padding: 0 80px; display: flex; flex-direction: column; align-items: center; text-align: center;">
+    <div class="lbl" style="color: rgba(244,239,231,0.55);">IIFD Kolkata · Free psychometric test</div>
+    <h1 class="disp" style="margin: 24px 0 0; font-size: 88px; line-height: 0.96; font-weight: 700; letter-spacing: -0.025em;">Which design<br><span style="color: {{accent2}};">is right for you?</span></h1>
+    <img src="black.jpg" alt="IIFD student design on the runway" style="width: 400px; height: 430px; margin-top: 36px; object-fit: cover; object-position: 50% 13%; border-radius: 200px 200px 0 0; display: block;">
+  </div>
+
+  <div style="padding: 40px 80px 0;">
+    <div class="fact">
+      <div class="fact-k" style="color: {{accent2}};">What it is</div>
+      <div class="fact-v">A short set of questions about how you think and what you notice.</div>
+    </div>
+    <div class="fact">
+      <div class="fact-k" style="color: {{accent2}};">What you get</div>
+      <div class="fact-v">A clear answer on which stream suits you — fashion, interior, textile or graphic.</div>
+    </div>
+    <div class="fact" style="border-bottom: 1px solid rgba(244,239,231,0.18);">
+      <div class="fact-k" style="color: {{accent2}};">What it costs</div>
+      <div class="fact-v">Nothing. You are not signing up for anything.</div>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <div style="padding: 0 80px;">
+    <p class="disp" style="margin: 0; text-align: center; font-size: 38px; font-style: italic; font-weight: 500; color: {{accent2}};">Free. No obligation.</p>
+  </div>
+
+  <div style="height: 420px; flex-shrink: 0;"></div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":1080,"height":1920}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>

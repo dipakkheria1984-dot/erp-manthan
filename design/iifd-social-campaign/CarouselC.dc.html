@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #F4EFE7; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #ED1C24; text-decoration: none; }
+    a:hover { color: #B01018; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .lbl { font-size: 19px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+    .course { font-size: 24px; line-height: 1.4; font-weight: 600; padding: 13px 0; border-top: 1px solid rgba(22,17,15,0.16); }
+    .course span { font-size: 18px; font-weight: 500; letter-spacing: 0.06em; color: rgba(22,17,15,0.5); }
+  </style>
+</helmet>
+<div style="width: 1080px; height: 1350px; background: #F4EFE7; color: #16110F; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 60px 64px 0; display: flex; justify-content: space-between; align-items: baseline;">
+    <span class="lbl" style="color: {{accent}};">03 / 03</span>
+    <span class="lbl" style="color: rgba(22,17,15,0.45);">IIFD Kolkata</span>
+  </div>
+
+  <div style="padding: 40px 64px 0;">
+    <h1 class="disp" style="margin: 0; font-size: 122px; line-height: 0.94; font-weight: 700; letter-spacing: -0.03em;">No entrance<br><span style="color: {{accent}};">exam.</span></h1>
+    <p style="margin: 30px 0 0; max-width: 900px; font-size: 27px; line-height: 1.55; color: rgba(22,17,15,0.76); text-wrap: pretty;">Passed Class 12? You can apply for a bachelor&#39;s. Class 10 is enough for a diploma, and a degree for a master&#39;s. Bring your marksheet and anything you have already made.</p>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: flex-end; gap: 44px; padding: 40px 64px 0; min-height: 0;">
+    <img src="brown.jpg" alt="IIFD student design on the runway" style="width: 360px; height: 100%; flex-shrink: 0; object-fit: cover; object-position: 50% 22%; border-radius: 180px 180px 0 0; display: block;">
+    <div style="flex-grow: 1; min-width: 0; padding-bottom: 6px;">
+      <div class="lbl" style="color: rgba(22,17,15,0.45); padding-bottom: 16px;">What you can study</div>
+      <div class="course">Fashion Design <span>B.Des · B.Sc · M.Des · MBA</span></div>
+      <div class="course">Interior Design <span>B.I.D · B.Sc · M.I.D · MBA</span></div>
+      <div class="course">Textile Design <span>Diploma to master&#39;s</span></div>
+      <div class="course">Graphic Design <span>Diploma</span></div>
+      <div class="course">Fashion Communication <span>Advanced diploma</span></div>
+      <div class="course">Styling &amp; Forecasting <span>Specialised</span></div>
+      <div class="course">Luxury Brand Management <span>Specialised</span></div>
+      <div class="course">3D Fashion Design <span>Specialised</span></div>
+    </div>
+  </div>
+
+  <div style="background: {{accent}}; color: #FFFFFF; padding: 34px 64px; display: flex; justify-content: space-between; align-items: flex-end; gap: 36px;">
+    <div>
+      <div class="disp" style="font-size: 54px; line-height: 1.05; font-weight: 700; letter-spacing: -0.01em;">Apply for 2027</div>
+      <div style="font-size: 22px; line-height: 1.5; margin-top: 12px; color: rgba(255,255,255,0.88);">Bhakta Tower, 5th &amp; 7th Floor, KB-22, Sector 3, Salt Lake, Kolkata 700098</div>
+    </div>
+    <div style="text-align: right; flex-shrink: 0; font-size: 21px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; line-height: 1.6;">
+      <div>iifdkolkata.in</div>
+      <div>033 7961 1179</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":1080,"height":1350}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+{
+  "pages": [
+    {
+      "id": "campaign",
+      "name": "This City Makes Designers"
+    },
+    {
+      "id": "directions",
+      "name": "Other directions"
+    }
+  ],
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "title": "01 · Launch post (1080×1350)",
+      "page": "campaign",
+      "x": 0,
+      "y": 0,
+      "w": 1080,
+      "h": 1350
+    },
+    {
+      "file": "CarouselA.dc.html",
+      "title": "02 · Carousel 1 — the hook",
+      "page": "campaign",
+      "x": 1200,
+      "y": 0,
+      "w": 1080,
+      "h": 1350
+    },
+    {
+      "file": "CarouselB.dc.html",
+      "title": "03 · Carousel 2 — the numbers",
+      "page": "campaign",
+      "x": 2400,
+      "y": 0,
+      "w": 1080,
+      "h": 1350
+    },
+    {
+      "file": "CarouselC.dc.html",
+      "title": "04 · Carousel 3 — the ask",
+      "page": "campaign",
+      "x": 3600,
+      "y": 0,
+      "w": 1080,
+      "h": 1350
+    },
+    {
+      "file": "Story.dc.html",
+      "title": "05 · Story ad — free psychometric test (1080×1920)",
+      "page": "campaign",
+      "x": -44,
+      "y": 1953,
+      "w": 1080,
+      "h": 1920
+    },
+    {
+      "file": "FestPost.dc.html",
+      "title": "06 · CTFW post (1080×1080)",
+      "page": "campaign",
+      "x": 1128,
+      "y": 1975,
+      "w": 1080,
+      "h": 1080
+    },
+    {
+      "file": "FeedGrid.dc.html",
+      "title": "07 · Grid preview — 3 weeks",
+      "page": "campaign",
+      "x": 2378,
+      "y": 2182,
+      "w": 1080,
+      "h": 1560
+    },
+    {
+      "file": "DirectionB.dc.html",
+      "title": "Direction B — Studio Floor",
+      "page": "directions",
+      "x": 0,
+      "y": 0,
+      "w": 540,
+      "h": 675
+    },
+    {
+      "file": "DirectionC.dc.html",
+      "title": "Direction C — Swatchbook",
+      "page": "directions",
+      "x": 660,
+      "y": 0,
+      "w": 540,
+      "h": 675
+    },
+    {
+      "file": "BookingPage.dc.html",
+      "title": "08 · Landing page — mobile (430px)",
+      "page": "campaign",
+      "x": 3606,
+      "y": 2082,
+      "w": 430,
+      "h": 1980,
+      "print": "flow"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "concept",
+      "page": "campaign",
+      "x": -480,
+      "y": 0,
+      "w": 380,
+      "text": "THIS CITY MAKES DESIGNERS\nCampaign name: Cut from Kolkata\n\nThe argument: design is not learned in a vacuum. Kolkata has been making things for three hundred years, and IIFD is where you learn to do it properly.\n\nThe conversion offer is the free psychometric test, not a campus visit — it asks for far less than \"come in and see us\", answers the question a seventeen-year-old actually has (which stream am I suited to?), and gives you a named lead either way.\n\nEnglish only, written to be read fast — short sentences, everyday words, no jargon. A fifteen-year-old and their parents should both get it on one pass.\n\nColours: warm ink #16110F, paper #F4EFE7, brand red #ED1C24, and marigold #E8A317 as the second accent — taxi yellow and Puja garland rather than a corporate gold.\n\nBodoni Moda for headlines, Archivo for everything else. The arched photo frame echoes the stage set in the CTFW photographs and reads as a pandal arch at the same time.\n\nBoth accent chips above each frame retint the whole set."
+    },
+    {
+      "id": "photos",
+      "page": "campaign",
+      "x": -480,
+      "y": 900,
+      "w": 380,
+      "text": "PHOTOGRAPHY\n\nAll five images are your real IIFD × Calcutta Times Fashion Week frames from Creative Cloud, cut out of the 2-up and 4-up collages so the burnt-in badge is gone and each runway shot stands on its own.\n\nEach source panel is only about 534px wide, so nothing is ever shown larger than it really is — that is why the photos sit in columns and plates rather than full bleed. If you can get the original full-resolution files from the photographer, every frame can go bigger.\n\nCredit the photographer wherever CTFW requires it."
+    },
+    {
+      "id": "verify",
+      "page": "campaign",
+      "x": -480,
+      "y": 1730,
+      "w": 380,
+      "text": "BEFORE ANYTHING IS POSTED\n\n1. [YEAR] on carousel 2 — the IIRF ranking year is not on the website. It is the only placeholder left.\n2. The test card claims it costs nothing and carries no obligation. Make sure the counselling team actually runs it that way before it goes out — that promise is the whole offer.\n3. The 99% placement line names the 2025 batch, and the red bar says the figures are as published by IIFD. Keep both.\n4. PNG and PDF export cannot embed web fonts, so exported files fall back to a system serif in place of Bodoni Moda. Fine for review, not for final artwork.\n\nThe CTFW post still reads #CTFW2K26 because that is the event these photographs are from. Everything else now says 2027.\n\nNo individual mentors are named anywhere, though the website lists some. Get consent first if you want them in."
+    },
+    {
+      "id": "story-safe",
+      "page": "campaign",
+      "x": 0,
+      "y": 3570,
+      "w": 520,
+      "text": "BUILT AS A PAID STORY AD\n\nThe card now keeps 270px clear at the top and 420px at the bottom, because Meta draws its own profile row and \"Book Now\" button over that space. The button that used to sit inside the creative is gone — two buttons stacked on each other is the most common way a story ad looks broken.\n\nPoint the swipe at the landing page beside this, not the homepage. An ad that promises a free test and lands on a general site is where the money leaks."
+    },
+    {
+      "id": "dir-note",
+      "page": "directions",
+      "x": 0,
+      "y": 790,
+      "w": 760,
+      "text": "Two directions I did not take, sketched rough so you can see the alternative rather than imagine it.\n\nB is worth revisiting if you commission a documentary photographer for the studio floor. C is the easiest to sustain week after week and the least distinctive.\n\nSay the word and I will build either one out properly."
+    },
+    {
+      "id": "landing",
+      "page": "campaign",
+      "x": 4217,
+      "y": 1746,
+      "w": 420,
+      "text": "LANDING PAGE — mobile, 430px\n\nAlmost all of this traffic arrives on a phone, so it is drawn at real phone width rather than shrunk down from a desktop layout.\n\nSame headline as the ad, same offer, same photograph. That match is what stops people bouncing — if the page says something different from the ad they just tapped, they leave.\n\nFour fields only. Every extra one costs you bookings, and the phone number is the one the counselling team actually needs. The proof block sits below the form, not above it — someone who is already convinced should not have to scroll past it.\n\nThis is a static mockup for a developer to build. Nothing submits."
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "campaign"
+  }
+}
