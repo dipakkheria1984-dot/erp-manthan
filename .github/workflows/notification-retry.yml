@@ -43,6 +43,12 @@ jobs:
             exit 0
           fi
 
+          # A value pasted with a trailing newline is a different value: the
+          # route compares with timingSafeEqual, which rejects on length
+          # before it looks at a single byte. Strip whitespace either side so
+          # a stray character cannot masquerade as a wrong secret.
+          JOB_SECRET="$(printf %s "$JOB_SECRET" | tr -d "[:space:]")"
+
           code=$(curl -sS -o /tmp/out.json -w '%{http_code}' \
             --max-time 120 --retry 2 --retry-delay 10 \
             -X POST -H "x-job-secret: $JOB_SECRET" \
