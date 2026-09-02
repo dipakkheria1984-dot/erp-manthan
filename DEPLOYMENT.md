@@ -136,6 +136,24 @@ Then, in the app:
 
 ## 9. Check the scheduled reminder
 
+**Only the daily reminder pass is a Vercel cron.** The Hobby plan allows a cron
+to run at most once a day, and a deployment carrying any expression that fires
+more often is rejected outright — the build fails with "Hobby accounts are
+limited to daily cron jobs", and it keeps failing until the expression goes.
+That is a whole-deployment failure, not a warning about the cron: nothing ships
+while it stands.
+
+The notification retry needs to run far more often than daily to be worth
+anything, so it is scheduled outside Vercel, by
+`.github/workflows/notification-retry.yml`, which POSTs to the same endpoint
+with `x-job-secret`. Set `JOB_SECRET` as a repository secret (Settings →
+Secrets and variables → Actions) to turn it on; until then the workflow runs and
+does nothing. Any other scheduler works the same way — the route accepts POST
+with that header from anywhere.
+
+If you move to the Pro plan, the retry can go back into `vercel.json` beside
+the reminder pass and the workflow can be deleted.
+
 `vercel.json` registers a daily cron on `/api/jobs/reminders` at `30 3 * * *`
 **UTC**, which is 09:00 IST. Vercel cron expressions are always UTC — if you
 change the time, convert it yourself.

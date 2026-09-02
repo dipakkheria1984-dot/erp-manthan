@@ -5,10 +5,6 @@
     {
       "path": "/api/jobs/reminders",
       "schedule": "30 3 * * *"
-    },
-    {
-      "path": "/api/jobs/notification-retry",
-      "schedule": "*/30 * * * *"
     }
   ]
 }

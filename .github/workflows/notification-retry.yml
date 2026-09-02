@@ -1,0 +1,59 @@
+# Retry of messages the gateway would not take, every half hour.
+#
+# This lives here rather than in `vercel.json` because Vercel's Hobby plan
+# allows a cron to run at most once a day, and a retry that waits a day is no
+# use — see the comment on src/app/api/jobs/notification-retry/route.ts. The
+# daily reminder pass is still a Vercel cron; only this one moved out.
+#
+# It does nothing until JOB_SECRET is set, so adding this file cannot start
+# failing on its own. To turn it on:
+#
+#   Settings → Secrets and variables → Actions → New repository secret
+#     JOB_SECRET   the same value as the JOB_SECRET in Vercel
+#
+#   Optionally, under Variables, APP_URL if the app is not on the URL below.
+#
+# GitHub's scheduler is best-effort and can run late under load, which this job
+# tolerates: each pass simply picks up whatever is still unsent.
+
+name: Notification retry
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: notification-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger the retry pass
+        env:
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://erp-manthan.vercel.app' }}
+        run: |
+          if [ -z "$JOB_SECRET" ]; then
+            echo "JOB_SECRET is not set — nothing to do."
+            echo "Add it under Settings → Secrets and variables → Actions to enable this."
+            exit 0
+          fi
+
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' \
+            --max-time 120 --retry 2 --retry-delay 10 \
+            -X POST -H "x-job-secret: $JOB_SECRET" \
+            "$APP_URL/api/jobs/notification-retry")
+
+          echo "HTTP $code"
+          cat /tmp/out.json || true
+          echo
+
+          # A pass that finds nothing is the normal case and still returns 200.
+          if [ "$code" != "200" ]; then
+            echo "::error::Retry pass failed with HTTP $code"
+            exit 1
+          fi
