@@ -749,10 +749,16 @@ export async function ledgerReport(params: ReportParams): Promise<ReportResult> 
             debit: lateFeeCharged,
             credit: 0,
             status: "Late fee",
+            // The days are what explains the charge, so they are only quoted
+            // while there is still something to explain. Once the installment
+            // is settled the count stops (see `balanceOf`), and printing it
+            // would read "0 day(s) overdue" against a fee that was real.
             note:
-              balance.lateFeePaidPaise > 0 && balance.lateFeeOutstandingPaise === 0
-                ? "Charged and settled"
-                : `${balance.daysOverdue} day(s) overdue`,
+              balance.lateFeeOutstandingPaise > 0
+                ? `${balance.daysOverdue} day(s) overdue`
+                : balance.lateFeePaidPaise > 0
+                  ? "Charged and settled"
+                  : "Charged, nothing outstanding",
           });
         }
       }
