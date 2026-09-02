@@ -162,6 +162,18 @@ export function balanceOf(
   const lateFeeOutstandingPaise = Math.max(0, lateFeeAssessedPaise - lateFeeWaivedPaise - lateFeePaidPaise);
   const totalOutstandingPaise = principalOutstandingPaise + lateFeeOutstandingPaise;
 
+  /**
+   * Nothing outstanding is nothing overdue.
+   *
+   * Money that arrived late *was* late, but it is settled, and leaving the
+   * counter running on it put "45d overdue" beside installments that had been
+   * paid in full. A waived installment already reports zero for exactly this
+   * reason; a paid one is the same case. The raw lateness is still what the
+   * late fee was assessed on, and that figure is recorded on the payments that
+   * settled it.
+   */
+  const reportedDaysOverdue = totalOutstandingPaise > 0 ? days : 0;
+
   const status =
     totalOutstandingPaise <= 0
       ? "PAID"
@@ -180,7 +192,7 @@ export function balanceOf(
     lateFeePaidPaise,
     lateFeeOutstandingPaise,
     totalOutstandingPaise,
-    daysOverdue: days,
+    daysOverdue: reportedDaysOverdue,
     status,
   };
 }

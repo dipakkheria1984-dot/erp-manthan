@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ActionForm, SubmitButton, fieldError } from "@/components/form";
 import { Alert, Badge, Field, FormActions, FormGrid, Input, Select, TableWrap, Td, Th, Tr } from "@/components/ui";
 import { toDateInput } from "@/lib/dates";
-import { formatPaise, paiseToRupees, rupeesToPaise } from "@/lib/money";
+import { formatPaise, rupeesToPaise } from "@/lib/money";
 import { recordPaymentAction } from "../actions";
 
 /** Already ordered oldest-due-first by the page. */
@@ -55,26 +55,23 @@ export function PaymentForm({
   installments: PayableInstallment[];
 }) {
   const totalOutstanding = installments.reduce((sum, row) => sum + row.outstandingPaise, 0);
-  const [amount, setAmount] = useState(String(paiseToRupees(totalOutstanding)));
-  const [receipt, setReceipt] = useState<string | null>(null);
-
   /**
-   * Re-seed the amount whenever what the student owes changes.
+   * Deliberately empty, never prefilled with the balance.
    *
-   * `useState` seeds once, so after a payment was recorded the page revalidated
-   * with a smaller balance while the box still held the sum just taken — shown
-   * allocated against the *next* installments, with the button still armed.
-   * Pressing it again took the money twice.
+   * A box that arrives holding the full amount due is a receipt for the full
+   * amount due one careless Enter away, and part payments are the norm here —
+   * the figure has to be the money actually in front of the collector, typed
+   * from the cash or the transfer, not a default nobody chose. What is owed is
+   * still on screen either way: in the hint below, in the tiles above, and in
+   * the allocation table that appears as soon as an amount is entered.
    *
-   * Adjusting state during render is React's own answer to a value that has to
-   * follow a prop; the alternative, an effect, would paint the stale figure
-   * first and correct it after, which is the flicker this is meant to remove.
+   * Clearing it after a payment matters just as much as not seeding it. The
+   * page revalidates with a smaller balance, and an amount left sitting in the
+   * box would be shown allocated against the *next* installments with the
+   * button still armed — which is how the same money gets taken twice.
    */
-  const [seededFor, setSeededFor] = useState(totalOutstanding);
-  if (seededFor !== totalOutstanding) {
-    setSeededFor(totalOutstanding);
-    setAmount(String(paiseToRupees(totalOutstanding)));
-  }
+  const [amount, setAmount] = useState("");
+  const [receipt, setReceipt] = useState<string | null>(null);
 
   // Nothing left to collect. The component stays mounted rather than the page
   // dropping it, so the receipt just generated is still on screen to be
@@ -109,6 +106,8 @@ export function PaymentForm({
       onSuccess={(state) => {
         const data = state.ok ? (state.data as { receiptNo: string }) : undefined;
         setReceipt(data?.receiptNo ?? null);
+        // Controlled, so `resetOnSuccess` does not reach it — see above.
+        setAmount("");
       }}
     >
       {(state) => (
@@ -122,7 +121,7 @@ export function PaymentForm({
               label="Amount (₹)"
               htmlFor="amountPaise"
               required
-              hint={`Applied to the oldest due installment first. Up to ${formatPaise(totalOutstanding)} outstanding in total — one amount can settle several installments.`}
+              hint={`Enter the amount actually received. It is applied to the oldest due installment first, so one amount can settle several — ${formatPaise(totalOutstanding)} is outstanding in total.`}
               error={fieldError(state, "amountPaise")}
             >
               <Input
