@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { enqueueTallyCancellation, enqueueTallyReceipt } from "@/lib/tally/outbox";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertPermission } from "@/lib/auth";
@@ -186,6 +187,8 @@ export async function recordPaymentAction(_prev: unknown, formData: FormData): P
     revalidatePath("/fees/collect");
     revalidatePath("/fees/receipts");
     revalidatePath(`/students/${studentId}`);
+    // Non-cash receipts become a voucher in Tally; the connector decides which.
+    await enqueueTallyReceipt(receiptNo);
     if (cleared) revalidatePath(`/enrollment/${student.applicationId}`);
 
     const covered =
@@ -332,6 +335,8 @@ export async function cancelReceiptAction(_prev: unknown, formData: FormData): P
     revalidatePath("/enrollment");
     if (payment.studentId) revalidatePath(`/students/${payment.studentId}`);
     if (payment.applicationId) revalidatePath(`/enrollment/${payment.applicationId}`);
+    // Cancelled — never deleted — in Tally, so Edit Log keeps the voucher's history.
+    await enqueueTallyCancellation(payment.receiptNo);
     return ok(
       undefined,
       `Receipt ${payment.receiptNo} voided. The number is retained and the installment has been recalculated.` +

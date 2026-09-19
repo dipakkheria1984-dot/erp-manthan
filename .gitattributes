@@ -11,3 +11,6 @@
 *.ico binary
 *.pdf binary
 package-lock.json -diff linguist-generated
+
+# Windows batch files run on the Tally PC and must keep CRLF.
+*.cmd text eol=crlf
