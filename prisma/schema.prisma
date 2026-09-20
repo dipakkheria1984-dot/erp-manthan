@@ -1365,3 +1365,116 @@ model TermsVersion {
   @@unique([document, version])
   @@index([document, effectiveFrom])
 }
+
+// ---------------------------------------------------------------------------
+// Tally Prime (Edit Log) — outbound accounting connector
+// ---------------------------------------------------------------------------
+
+/// Where the credit side of a Tally receipt voucher lands.
+enum TallyCreditMode {
+  /// One named ledger for all fee receipts ("Fees Received").
+  FIXED
+  /// A ledger per student, created in Tally on first use under
+  /// `studentLedgerGroup` — party-wise balances inside Tally.
+  STUDENT
+}
+
+enum TallySyncAction {
+  /// Post the receipt as a voucher.
+  CREATE
+  /// Cancel that voucher — never delete it, so Edit Log keeps the history.
+  CANCEL
+}
+
+enum TallySyncStatus {
+  PENDING
+  /// Handed to the bridge on the Tally PC and not yet acknowledged.
+  IN_FLIGHT
+  SYNCED
+  FAILED
+  /// Deliberately not sent — cancelled in the ERP before it ever reached Tally.
+  SKIPPED
+}
+
+/// Singleton (id = 1). How receipts become vouchers in Tally Prime.
+///
+/// Ledger names must match Tally exactly, spelling and case. Changing one takes
+/// effect for every voucher not yet synced, because the voucher XML is built at
+/// the moment the bridge collects it rather than when the receipt was queued —
+/// which is also what lets a failed row succeed on retry once a name is fixed.
+model TallyConfig {
+  id      Int     @id @default(1)
+  enabled Boolean @default(false)
+
+  /// Tally company to post into. Blank posts to whichever company is open.
+  companyName     String?
+  voucherTypeName String  @default("Receipt")
+  /// Receipts dated before this are never sent, so switching the connector on
+  /// does not pour the whole history into the books.
+  syncFrom        DateTime?
+
+  /// Debit ledger per non-cash mode. Cash never goes to Tally.
+  ledgerUpi          String?
+  ledgerCard         String?
+  ledgerBankTransfer String?
+  ledgerCheque       String?
+  ledgerOther        String?
+
+  creditMode         TallyCreditMode @default(FIXED)
+  feeLedger          String          @default("Fees Received")
+  registrationLedger String          @default("Registration Fees Received")
+  /// When set, the late-fee portion of a receipt is credited here separately.
+  lateFeeLedger      String?
+  studentLedgerGroup String          @default("Sundry Debtors")
+
+  /// Adds BANKALLOCATIONS (instrument no. and date) for bank reconciliation.
+  /// Needs banking details switched on for those ledgers in Tally.
+  sendBankAllocations Boolean @default(false)
+
+  /// Heartbeat from the bridge on the Tally PC, so the office can see at a
+  /// glance whether vouchers can flow at all.
+  bridgeLastSeenAt   DateTime?
+  bridgeTallyOnline  Boolean?
+
+  updatedAt DateTime @updatedAt
+}
+
+/// Outbound queue to Tally Prime, one row per receipt per action.
+///
+/// Unlike the Campus queue this does not coalesce: Tally Edit Log is an audit
+/// trail, and a receipt's creation and its cancellation are two separate
+/// events it should record. A CANCEL is only handed out once its CREATE has
+/// synced, so the two can never reach Tally out of order.
+///
+/// Receipts are queued straight after they are saved, and a sweep on every
+/// bridge poll queues anything that was missed — so a failure to enqueue
+/// delays a voucher but never loses one.
+model TallySyncOutbox {
+  id        String          @id @default(cuid())
+  receiptNo String
+  action    TallySyncAction
+  status    TallySyncStatus @default(PENDING)
+
+  attempts      Int       @default(0)
+  lastError     String?
+  nextAttemptAt DateTime  @default(now())
+  /// While IN_FLIGHT: when an unacknowledged row may be handed out again.
+  leasedUntil   DateTime?
+
+  /// Tally's MASTERID for the voucher, from the CREATE acknowledgement. Lets a
+  /// cancellation find the voucher even if its number was renumbered in Tally.
+  tallyMasterId String?
+  syncedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([receiptNo, action])
+  @@index([status, nextAttemptAt])
+}
+
+/// Student ledgers already created in Tally, so a master is sent only once.
+model TallyLedger {
+  name      String   @id
+  createdAt DateTime @default(now())
+}

@@ -60,6 +60,13 @@ export const env = {
   sessionTtlHours: optionalInt("SESSION_TTL_HOURS", 12),
   uploadDir: process.env.UPLOAD_DIR ?? "./storage/uploads",
   maxUploadMb: optionalInt("MAX_UPLOAD_MB", 5),
+  /**
+   * Key the Tally bridge on the office PC presents, as `x-tally-key`, when it
+   * collects vouchers from /api/tally/pull and reports back to /api/tally/ack.
+   * Blank refuses the bridge entirely.
+   */
+  tallyBridgeKey: process.env.TALLY_BRIDGE_KEY ?? "",
+
   jobSecret: process.env.JOB_SECRET ?? "",
   // Vercel Cron authenticates with `Authorization: Bearer $CRON_SECRET` and
   // cannot send a custom header, so scheduled runs use this instead of

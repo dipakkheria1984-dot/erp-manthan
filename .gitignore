@@ -52,3 +52,7 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Tally bridge — local secret and log on the Tally PC
+tally-bridge/bridge.env
+tally-bridge/bridge.log*
