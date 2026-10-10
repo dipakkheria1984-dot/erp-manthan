@@ -339,8 +339,6 @@ export async function cancelReceiptAction(_prev: unknown, formData: FormData): P
     // A voided receipt is money that never stayed with the institute, so the
     // far end has to be told: it will not appear in the next payload at all.
     if (payment.studentId) await notifyCampus(payment.studentId, "FINANCE", "fee.receipt_cancelled");
-    // Cancelled — never deleted — in Tally, so Edit Log keeps the voucher's history.
-    await enqueueTallyCancellation(payment.receiptNo);
     if (payment.applicationId) revalidatePath(`/enrollment/${payment.applicationId}`);
     // Cancelled — never deleted — in Tally, so Edit Log keeps the voucher's history.
     await enqueueTallyCancellation(payment.receiptNo);
