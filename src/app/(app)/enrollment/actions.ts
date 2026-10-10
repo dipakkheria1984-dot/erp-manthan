@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notifyCampus } from "@/lib/campus/publisher";
 import { enqueueTallyReceipt } from "@/lib/tally/outbox";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -1020,6 +1021,7 @@ export async function approveApplicationAction(_prev: unknown, formData: FormDat
     });
 
     await queueWelcomeNotification(student.id);
+    await notifyCampus(student.id, "ALL", "enrollment.approved");
 
     revalidatePath("/enrollment");
     revalidatePath(`/enrollment/${applicationId}`);
