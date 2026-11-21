@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Caveat:wght@500;700&display=swap">
+  <style>
+    body { margin: 0; background: #FFFFFF; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; }
+    a { color: #ED1C24; } a:hover { color: #B01018; }
+    .hand { font-family: 'Caveat','Bradley Hand',cursive; }
+    .sw { border-radius: 14px; height: 96px; display: flex; align-items: flex-end; padding: 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+    .bar-l { background: #C9C5C1; height: 10px; border-radius: 5px; }
+  </style>
+</helmet>
+<div style="width: 540px; height: 675px; background: #FFFFFF; color: #262220; display: flex; flex-direction: column; padding: 30px; overflow: hidden;">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 2px solid #262220;">
+    <span style="font-size: 15px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;">Direction C</span>
+    <span class="hand" style="font-size: 22px; color: #ED1C24;">&#34;Swatchbook&#34;</span>
+  </div>
+
+  <div style="margin-top: 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+    <div class="sw" style="background: #ED1C24; color: #FFFFFF;">Fashion</div>
+    <div class="sw" style="background: #E8D9C0; color: #262220;">Textile</div>
+    <div class="sw" style="background: #2F4A3F; color: #FFFFFF;">Interior</div>
+    <div class="sw" style="background: #D8DCE0; color: #262220;">Graphic</div>
+    <div class="sw" style="background: #262220; color: #FFFFFF;">Styling</div>
+    <div class="sw" style="background: #F0A03C; color: #262220;">3D</div>
+  </div>
+
+  <div style="margin-top: 22px; display: flex; flex-direction: column; gap: 9px;">
+    <div style="background: #262220; height: 16px; width: 64%; border-radius: 8px;"></div>
+    <div class="bar-l" style="width: 88%; margin-top: 6px;"></div>
+    <div class="bar-l" style="width: 76%;"></div>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <p class="hand" style="margin: 0 0 14px; font-size: 21px; line-height: 1.35; color: #6B6560;">One colour block per discipline, rounded and friendly, a swatch card each week. Very legible on a phone and easy to keep posting — but it reads school-brochure, not fashion week.</p>
+
+  <div style="display: flex; gap: 8px; align-items: center; border-top: 2px solid #262220; padding-top: 12px;">
+    <div style="width: 14px; height: 14px; background: #ED1C24; border-radius: 4px;"></div>
+    <span style="font-size: 14px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #6B6560;">Red is one of six</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":540,"height":675}}'>
+class Component extends DCLogic {}
+</script>
+</body>
+</html>

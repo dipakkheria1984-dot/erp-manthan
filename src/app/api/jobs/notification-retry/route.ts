@@ -1,6 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { env } from "@/lib/env";
+import { authorizeJobRequest } from "@/lib/job-auth";
 import { runNotificationRetryPass } from "@/lib/notification-retry";
 
 /**
@@ -21,15 +20,6 @@ import { runNotificationRetryPass } from "@/lib/notification-retry";
 export const maxDuration = 60;
 const BUDGET_MS = 50_000;
 
-/** Constant-time compare, so a wrong secret leaks nothing through timing. */
-function secretMatches(provided: string | null, expected: string): boolean {
-  if (!provided || !expected) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
 async function runPass() {
   try {
     const result = await runNotificationRetryPass(new Date(), BUDGET_MS);
@@ -41,23 +31,13 @@ async function runPass() {
 }
 
 export async function POST(request: Request) {
-  if (!env.jobSecret) {
-    return NextResponse.json({ error: "JOB_SECRET is not configured." }, { status: 503 });
-  }
-  if (!secretMatches(request.headers.get("x-job-secret"), env.jobSecret)) {
-    return NextResponse.json({ error: "Unauthorised." }, { status: 401 });
-  }
+  const denied = authorizeJobRequest(request);
+  if (denied) return denied;
   return runPass();
 }
 
 export async function GET(request: Request) {
-  if (!env.cronSecret) {
-    return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
-  }
-  const header = request.headers.get("authorization");
-  const bearer = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
-  if (!secretMatches(bearer, env.cronSecret)) {
-    return NextResponse.json({ error: "Unauthorised." }, { status: 401 });
-  }
+  const denied = authorizeJobRequest(request);
+  if (denied) return denied;
   return runPass();
 }

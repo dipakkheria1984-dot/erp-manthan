@@ -42,7 +42,9 @@ yarn-error.log*
 
 # Per-machine Claude Code settings. Records the exact commands that were run,
 # which on this project includes local database passwords and dev secrets.
-.claude/settings.local.json
+# The glob matters: an editor's or a script's .bak copy of this file holds the
+# same secrets, and would otherwise be picked up by `git add -A`.
+.claude/settings.local.json*
 
 # typescript
 *.tsbuildinfo
@@ -56,3 +58,9 @@ next-env.d.ts
 # Tally bridge — local secret and log on the Tally PC
 tally-bridge/bridge.env
 tally-bridge/bridge.log*
+
+# Backup agent — local secret, log and the archives themselves, which are a
+# full copy of the database and must never be committed.
+backup-agent/backup.env
+backup-agent/backup.log*
+backup-agent/archives/

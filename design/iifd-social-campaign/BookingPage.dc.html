@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #F4EFE7; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #ED1C24; text-decoration: none; }
+    a:hover { color: #B01018; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .flabel { font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(22,17,15,0.5); }
+    .finput { height: 54px; border: 1px solid rgba(22,17,15,0.28); background: #FFFFFF; border-radius: 4px; display: flex; align-items: center; padding: 0 14px; font-size: 17px; color: rgba(22,17,15,0.42); margin-top: 7px; }
+    .fact-k { font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+    .fact-v { font-size: 16px; line-height: 1.5; margin-top: 5px; color: rgba(244,239,231,0.78); }
+  </style>
+</helmet>
+<div style="width: 430px; background: #F4EFE7; color: #16110F; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="background: #16110F; color: #F4EFE7; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center;">
+    <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;">IIFD Kolkata</span>
+    <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; color: {{accent2}};">033 7961 1179</span>
+  </div>
+
+  <div style="background: #16110F; color: #F4EFE7; padding: 26px 20px 30px;">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: {{accent2}};">Free psychometric test</div>
+    <h1 class="disp" style="margin: 12px 0 0; font-size: 42px; line-height: 1.0; font-weight: 700; letter-spacing: -0.025em;">Which design is<br><span style="color: {{accent2}};">right for you?</span></h1>
+    <p style="margin: 16px 0 0; font-size: 17px; line-height: 1.55; color: rgba(244,239,231,0.76); text-wrap: pretty;">A short set of questions about how you think — and a clear answer on which stream suits you. It costs nothing, and you are not signing up for anything.</p>
+    <img src="hero.jpg" alt="IIFD student design on the Calcutta Times Fashion Week runway" style="width: 100%; height: 250px; margin-top: 22px; object-fit: cover; object-position: 50% 12%; border-radius: 195px 195px 0 0; display: block;">
+  </div>
+
+  <div style="padding: 26px 20px 30px;">
+    <h2 class="disp" style="margin: 0; font-size: 30px; line-height: 1.05; font-weight: 700;">Book your free test</h2>
+    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 20px;">
+      <div>
+        <div class="flabel">Full name</div>
+        <div class="finput">Your name</div>
+      </div>
+      <div>
+        <div class="flabel">Phone number</div>
+        <div class="finput">We will call to fix a slot</div>
+      </div>
+      <div>
+        <div class="flabel">Email</div>
+        <div class="finput">you@example.com</div>
+      </div>
+      <div>
+        <div class="flabel">Where are you right now?</div>
+        <div class="finput" style="justify-content: space-between;">
+          <span>Class 12</span>
+          <span style="color: rgba(22,17,15,0.55); font-size: 13px;">▾</span>
+        </div>
+      </div>
+    </div>
+    <div style="background: {{accent}}; color: #FFFFFF; height: 58px; border-radius: 4px; display: flex; align-items: center; justify-content: center; margin-top: 22px; font-size: 18px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">Book my free test</div>
+    <p style="margin: 14px 0 0; font-size: 14px; line-height: 1.5; color: rgba(22,17,15,0.58);">No fee, and no obligation to enrol. We use your number only to confirm the slot.</p>
+  </div>
+
+  <div style="background: #16110F; color: #F4EFE7; padding: 28px 20px;">
+    <div style="display: flex; flex-direction: column; gap: 18px;">
+      <div>
+        <div class="fact-k" style="color: {{accent2}};">What it is</div>
+        <div class="fact-v">A short set of questions about how you think and what you notice.</div>
+      </div>
+      <div>
+        <div class="fact-k" style="color: {{accent2}};">What you get</div>
+        <div class="fact-v">A clear answer on which stream suits you — fashion, interior, textile or graphic.</div>
+      </div>
+      <div>
+        <div class="fact-k" style="color: {{accent2}};">What happens next</div>
+        <div class="fact-v">You talk it through with a counsellor. Enrol or do not — the result is yours either way.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 26px 20px;">
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 16px;">
+      <div>
+        <div class="disp" style="font-size: 34px; line-height: 1; font-weight: 700; color: {{accent}};">99%</div>
+        <div style="font-size: 14px; line-height: 1.45; margin-top: 6px; color: rgba(22,17,15,0.66);">placed from the 2025 batch</div>
+      </div>
+      <div>
+        <div class="disp" style="font-size: 34px; line-height: 1; font-weight: 700;">5th</div>
+        <div style="font-size: 14px; line-height: 1.45; margin-top: 6px; color: rgba(22,17,15,0.66);">in India of the top 40 private design colleges, IIRF [YEAR]</div>
+      </div>
+      <div>
+        <div class="disp" style="font-size: 34px; line-height: 1; font-weight: 700;">45+</div>
+        <div style="font-size: 14px; line-height: 1.45; margin-top: 6px; color: rgba(22,17,15,0.66);">mentors who work in the industry</div>
+      </div>
+      <div>
+        <div class="disp" style="font-size: 34px; line-height: 1; font-weight: 700;">20</div>
+        <div style="font-size: 14px; line-height: 1.45; margin-top: 6px; color: rgba(22,17,15,0.66);">years in Kolkata, since 2004</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background: {{accent}}; color: #FFFFFF; padding: 24px 20px;">
+    <div style="font-size: 16px; line-height: 1.55;">Bhakta Tower, 5th &amp; 7th Floor, KB-22, Sector 3, Salt Lake, Kolkata 700098</div>
+    <div style="font-size: 16px; line-height: 1.55; margin-top: 10px; font-weight: 600;">033 7961 1179 · 9147 082975 · iifdkolkata.in</div>
+    <div style="font-size: 13px; line-height: 1.5; margin-top: 14px; color: rgba(255,255,255,0.78);">Admissions open for 2027 — fashion, interior, textile and graphic design.</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":430,"height":1980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap">
+  <style>
+    body { margin: 0; background: #16110F; font-family: 'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A317; text-decoration: none; }
+    a:hover { color: #ED1C24; }
+    .disp { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; }
+    .lbl { font-size: 19px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+    .row { display: flex; align-items: baseline; gap: 40px; border-top: 1px solid rgba(244,239,231,0.18); padding: 26px 0; }
+    .fig { font-family: 'Bodoni Moda','Didot','Bodoni MT',Georgia,serif; font-size: 100px; line-height: 1; font-weight: 700; letter-spacing: -0.03em; width: 250px; flex-shrink: 0; }
+    .cap { font-size: 26px; line-height: 1.5; color: rgba(244,239,231,0.76); }
+  </style>
+</helmet>
+<div style="width: 1080px; height: 1350px; background: #16110F; color: #F4EFE7; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 56px 64px 0; display: flex; justify-content: space-between; align-items: baseline;">
+    <span class="lbl" style="color: {{accent2}};">02 / 03</span>
+    <span class="lbl" style="color: rgba(244,239,231,0.45);">IIFD Kolkata</span>
+  </div>
+
+  <div style="padding: 46px 64px 0;">
+    <h1 class="disp" style="margin: 0; font-size: 92px; line-height: 0.96; font-weight: 700; letter-spacing: -0.025em;">Here are<br>the <span style="color: {{accent2}};">numbers.</span></h1>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <div style="padding: 0 64px;">
+    <div class="row">
+      <div class="fig" style="color: {{accent2}};">99%</div>
+      <div class="cap">of the 2025 batch were placed — Style Baazar, Asian Paints, Hoichoi, Sen Style Apparel and others.</div>
+    </div>
+    <div class="row">
+      <div class="fig">5th</div>
+      <div class="cap">in India out of the top 40 private design colleges, ranked by IIRF [YEAR].</div>
+    </div>
+    <div class="row">
+      <div class="fig">45+</div>
+      <div class="cap">mentors who work in the industry, not only teach in it.</div>
+    </div>
+    <div class="row" style="border-bottom: 1px solid rgba(244,239,231,0.18);">
+      <div class="fig">20</div>
+      <div class="cap">years in Kolkata — we started in 2004. Tied up with FDCI, IIID, ELIA and the Textile Association of India.</div>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1;"></div>
+
+  <div style="background: {{accent}}; color: #FFFFFF; padding: 26px 64px; display: flex; justify-content: space-between; align-items: center;">
+    <span style="font-size: 21px; line-height: 1.4; color: rgba(255,255,255,0.9);">Figures as published by IIFD Kolkata</span>
+    <span class="lbl" style="font-weight: 700;">Swipe →</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ED1C24","options":["#ED1C24","#B01018","#0F5C4A","#1B3A8F"],"section":"Campaign"},"accent2":{"editor":"color","default":"#E8A317","options":["#E8A317","#F5B301","#C9761E","#D4AF37"],"section":"Campaign"},"$preview":{"width":1080,"height":1350}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#ED1C24',
+      accent2: this.props.accent2 ?? '#E8A317'
+    };
+  }
+}
+</script>
+</body>
+</html>
