@@ -52,3 +52,9 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Backup agent — local secret, log and the archives themselves, which are a
+# full copy of the database and must never be committed.
+backup-agent/backup.env
+backup-agent/backup.log*
+backup-agent/archives/

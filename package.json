@@ -14,7 +14,10 @@
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "job:reminders": "tsx scripts/run-reminders.ts",
-    "job:notification-retry": "tsx scripts/run-notification-retry.ts"
+    "job:notification-retry": "tsx scripts/run-notification-retry.ts",
+    "backup:restore": "tsx scripts/restore-backup.ts",
+    "backup:pull": "node backup-agent/backup.mjs",
+    "backup:verify": "node backup-agent/backup.mjs --verify-only"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.5.7",
