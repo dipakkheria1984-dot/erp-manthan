@@ -9,6 +9,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { deleteUpload, storeImage } from "@/lib/storage";
 import { pdfFirstPageToPng } from "@/lib/pdf-raster";
 import { getCommunicationConfig, getInstitute } from "@/lib/config";
+import { publishInstituteSoon } from "@/lib/campus/publisher";
 import {
   emailIsLive,
   templatePanelRequest,
@@ -86,6 +87,10 @@ export async function saveInstituteProfileAction(_prev: unknown, formData: FormD
       entityId: "1",
       summary: "Institute profile updated",
     });
+    // Manthan Campus shows this name and address too; it is told rather
+    // than asked, so the two can never disagree about who the institute is.
+    publishInstituteSoon("institute.profile_updated");
+
     revalidatePath("/setup");
     return ok(undefined, "Institute profile saved.");
   });
@@ -134,6 +139,8 @@ export async function uploadInstituteLogoAction(
       entityId: "1",
       summary: `Institute logo ${institute.logoStoragePath ? "replaced" : "uploaded"} (${stored.fileName})`,
     });
+    publishInstituteSoon("institute.logo_uploaded");
+
     revalidatePath("/setup");
     revalidatePath("/setup/printing");
     return ok(undefined, "Logo uploaded. It appears on every document generated from now on.");
@@ -168,6 +175,8 @@ export async function removeInstituteLogoAction(
       entityId: "1",
       summary: "Institute logo removed",
     });
+    publishInstituteSoon("institute.logo_removed");
+
     revalidatePath("/setup");
     revalidatePath("/setup/printing");
     return ok(undefined, "Logo removed. Documents print with the name alone.");

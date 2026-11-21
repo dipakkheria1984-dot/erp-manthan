@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notifyCampus } from "@/lib/campus/publisher";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertPermission } from "@/lib/auth";
@@ -447,6 +448,9 @@ export async function changeCourseAction(_prev: unknown, formData: FormData): Pr
 
     revalidatePath("/students");
     revalidatePath(`/students/${studentId}`);
+    // The old fee structure was deleted outright, so the far end is sent a
+    // complete picture and drops the lines that no longer exist.
+    await notifyCampus(studentId, "ALL", "enrollment.course_changed");
     revalidatePath("/enrollment");
     revalidatePath(`/enrollment/${student.application.id}`);
     revalidatePath("/enrollment/course-change");

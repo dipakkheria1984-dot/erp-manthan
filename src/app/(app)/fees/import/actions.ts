@@ -7,6 +7,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { fail, ok, runAction, type ActionResult } from "@/lib/errors";
 import { storeSpreadsheet, deleteUpload } from "@/lib/storage";
 import { formatPaise } from "@/lib/money";
+import { enqueueTallyReceipts } from "@/lib/tally/outbox";
 import {
   commitReceiptImport,
   prepareReceiptImport,
@@ -66,6 +67,7 @@ export async function commitReceiptImportAction(
     if (preview.validRows === 0) return fail("There are no valid rows left to import.");
 
     const outcome = await commitReceiptImport(preview, actor.id);
+    await enqueueTallyReceipts(outcome.receiptNos);
 
     revalidatePath("/fees/receipts");
     revalidatePath("/fees/collect");

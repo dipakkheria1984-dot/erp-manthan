@@ -60,6 +60,29 @@ export const env = {
   sessionTtlHours: optionalInt("SESSION_TTL_HOURS", 12),
   uploadDir: process.env.UPLOAD_DIR ?? "./storage/uploads",
   maxUploadMb: optionalInt("MAX_UPLOAD_MB", 5),
+  /**
+   * Manthan Campus — the attendance & academic application downstream of this
+   * one. Both must be set for anything to be published; leaving them blank
+   * turns the integration off cleanly, and queued changes simply wait.
+   *
+   * `campusWebhookSecret` must match ERP_WEBHOOK_SECRET on the campus side.
+   */
+  campusWebhookUrl: process.env.CAMPUS_WEBHOOK_URL ?? "",
+  campusWebhookSecret: process.env.CAMPUS_WEBHOOK_SECRET ?? "",
+  /**
+   * Shared key Manthan Campus presents when *it* asks for a resync, as
+   * `x-campus-api-key` against /api/campus/resync. Separate from the webhook
+   * secret on purpose: one authenticates us to them, this authenticates them to
+   * us, and a leak of either should not compromise the other.
+   */
+  campusApiKey: process.env.CAMPUS_API_KEY ?? "",
+  /**
+   * Key the Tally bridge on the office PC presents, as `x-tally-key`, when it
+   * collects vouchers from /api/tally/pull and reports back to /api/tally/ack.
+   * Blank refuses the bridge entirely.
+   */
+  tallyBridgeKey: process.env.TALLY_BRIDGE_KEY ?? "",
+
   jobSecret: process.env.JOB_SECRET ?? "",
   // Vercel Cron authenticates with `Authorization: Bearer $CRON_SECRET` and
   // cannot send a custom header, so scheduled runs use this instead of

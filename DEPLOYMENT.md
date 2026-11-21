@@ -117,9 +117,11 @@ On Windows PowerShell the syntax differs — set each variable first, then run:
 $env:DIRECT_URL="<neon-direct-string>"; npm run db:deploy
 ```
 
-Migrations are deliberately **not** part of the build. A build that migrates
-runs DDL against live student data every time it deploys, and leaves the
-database ahead of the code if you ever roll a deployment back.
+After this first time, **Production** deploys apply pending migrations
+themselves: `npm run build` runs `scripts/migrate-on-deploy.mjs` before
+`next build`, so code never goes live against a database missing the columns it
+reads. **Preview** deploys skip that step. They share the production database,
+and a pull request must not change live student data before it is merged.
 
 ## 8. First sign-in
 
@@ -135,6 +137,24 @@ Then, in the app:
   built from permissions, not the other way round; Admin can define new ones.
 
 ## 9. Check the scheduled reminder
+
+**Only the daily reminder pass is a Vercel cron.** The Hobby plan allows a cron
+to run at most once a day, and a deployment carrying any expression that fires
+more often is rejected outright — the build fails with "Hobby accounts are
+limited to daily cron jobs", and it keeps failing until the expression goes.
+That is a whole-deployment failure, not a warning about the cron: nothing ships
+while it stands.
+
+The notification retry needs to run far more often than daily to be worth
+anything, so it is scheduled outside Vercel, by
+`.github/workflows/notification-retry.yml`, which POSTs to the same endpoint
+with `x-job-secret`. Set `JOB_SECRET` as a repository secret (Settings →
+Secrets and variables → Actions) to turn it on; until then the workflow runs and
+does nothing. Any other scheduler works the same way — the route accepts POST
+with that header from anywhere.
+
+If you move to the Pro plan, the retry can go back into `vercel.json` beside
+the reminder pass and the workflow can be deleted.
 
 `vercel.json` registers a daily cron on `/api/jobs/reminders` at `30 3 * * *`
 **UTC**, which is 09:00 IST. Vercel cron expressions are always UTC — if you
@@ -157,12 +177,19 @@ would have sent and nothing goes out.
 
 ## Notes for later
 
-**Schema changes.** Migrations are deliberately not part of the build — a build
-that migrates can leave the database ahead of a rolled-back deployment. After
-changing the schema, run `npm run db:deploy` against the direct connection
-string yourself, **then** deploy. In that order: a push deploys within about a
-minute, and any page reading a table the migration has not yet created answers
-with a server error until it does.
+**Schema changes.** A Production deploy applies committed migrations before it
+builds, and fails rather than going live if it cannot. Preview deploys never
+migrate, so a pull request's schema change reaches the database only when it is
+merged. Remember the build migrates *forward only*: rolling a deployment back
+leaves the database ahead of the code. That is harmless for additive changes and
+not for drops or renames.
+
+**Previews and the database.** Preview deployments still receive the production
+`DATABASE_URL`. They skip migrations, but a preview that ran (it needs
+`AUTH_SECRET` for the Preview environment, which is deliberately not set) would
+read and write live data. To get working previews, first give Preview its own
+database: enable Neon's preview branching, or set a separate `DATABASE_URL`
+for the Preview environment. Only then add Preview's `AUTH_SECRET`.
 
 An additive migration — a new table, a new nullable column — is safe to apply
 while the current build is still live, because that build simply ignores what it

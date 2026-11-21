@@ -9,6 +9,7 @@ const TABS = [
   { label: "Global configuration", href: "/setup/config" },
   { label: "Late fee slabs", href: "/setup/late-fees" },
   { label: "Communication", href: "/setup/communication" },
+  { label: "Tally Prime", href: "/setup/tally" },
   { label: "Academic years", href: "/setup/academic-years" },
   { label: "Document checklist", href: "/setup/documents" },
   { label: "Terms & conditions", href: "/setup/terms" },

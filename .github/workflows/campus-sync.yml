@@ -1,0 +1,63 @@
+# Drain the Manthan Campus outbound queue, every ten minutes.
+#
+# Like notification-retry.yml, this lives here rather than in `vercel.json`
+# because Vercel's Hobby plan rejects any cron that runs more than once a day —
+# and rejects the whole deployment, not just the cron. A change the office
+# makes should reach Campus within minutes, not the next morning.
+#
+# Most changes are pushed to Campus the moment they happen; this pass delivers
+# whatever that first attempt could not (Campus down, a network blip), and
+# re-sends the institute profile.
+#
+# It does nothing until JOB_SECRET is set, so adding this file cannot start
+# failing on its own. It shares the JOB_SECRET repository secret (and optional
+# APP_URL variable) with notification-retry.yml.
+#
+# GitHub's scheduler is best-effort and can run late under load, which this job
+# tolerates: each pass simply picks up whatever is still pending.
+
+name: Campus sync
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: campus-sync
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger the campus sync pass
+        env:
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://erp-manthan.vercel.app' }}
+        run: |
+          if [ -z "$JOB_SECRET" ]; then
+            echo "JOB_SECRET is not set — nothing to do."
+            echo "Add it under Settings → Secrets and variables → Actions to enable this."
+            exit 0
+          fi
+
+          # Same whitespace guard as notification-retry.yml: a pasted trailing
+          # newline would otherwise read as a wrong secret.
+          JOB_SECRET="$(printf %s "$JOB_SECRET" | tr -d "[:space:]")"
+
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' \
+            --max-time 120 --retry 2 --retry-delay 10 \
+            -X POST -H "x-job-secret: $JOB_SECRET" \
+            "$APP_URL/api/jobs/campus-sync")
+
+          echo "HTTP $code"
+          cat /tmp/out.json || true
+          echo
+
+          # A pass that finds nothing is the normal case and still returns 200.
+          if [ "$code" != "200" ]; then
+            echo "::error::Campus sync pass failed with HTTP $code"
+            exit 1
+          fi

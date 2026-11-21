@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notifyCampus } from "@/lib/campus/publisher";
+import { enqueueTallyReceipt } from "@/lib/tally/outbox";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -523,11 +525,12 @@ export async function recordRegistrationFeeAction(_prev: unknown, formData: Form
 
     const config = await getConfig();
 
-    await prisma.$transaction(async (tx) => {
+    const receiptNo = await prisma.$transaction(async (tx) => {
       const seq = await nextSequenceValue(SEQ.RECEIPT, tx);
+      const number = formatSequence(config.receiptPrefix, seq, config.receiptPadding);
       await tx.payment.create({
         data: {
-          receiptNo: formatSequence(config.receiptPrefix, seq, config.receiptPadding),
+          receiptNo: number,
           kind: "REGISTRATION",
           applicationId,
           amountPaise,
@@ -548,7 +551,9 @@ export async function recordRegistrationFeeAction(_prev: unknown, formData: Form
             : {}),
         },
       });
+      return number;
     });
+    await enqueueTallyReceipt(receiptNo);
 
     await recordAudit({
       userId: actor.id,
@@ -1016,6 +1021,7 @@ export async function approveApplicationAction(_prev: unknown, formData: FormDat
     });
 
     await queueWelcomeNotification(student.id);
+    await notifyCampus(student.id, "ALL", "enrollment.approved");
 
     revalidatePath("/enrollment");
     revalidatePath(`/enrollment/${applicationId}`);

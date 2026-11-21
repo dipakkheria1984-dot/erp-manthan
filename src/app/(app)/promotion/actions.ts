@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { notifyCampusMany } from "@/lib/campus/publisher";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertPermission } from "@/lib/auth";
@@ -232,6 +233,10 @@ export async function runPromotionAction(_prev: unknown, formData: FormData): Pr
       // promoted as one unit — give it more room than the default assumes.
       { timeout: 60_000 },
     );
+
+    // Queued after the transaction commits, so nothing is published for a
+    // promotion that rolled back. One row per student per topic, coalesced.
+    await notifyCampusMany(included.map((student) => student.id), "ALL", "promotion.run");
 
     revalidatePath("/promotion");
     revalidatePath("/students");
