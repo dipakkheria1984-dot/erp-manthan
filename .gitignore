@@ -42,7 +42,9 @@ yarn-error.log*
 
 # Per-machine Claude Code settings. Records the exact commands that were run,
 # which on this project includes local database passwords and dev secrets.
-.claude/settings.local.json
+# The glob matters: an editor's or a script's .bak copy of this file holds the
+# same secrets, and would otherwise be picked up by `git add -A`.
+.claude/settings.local.json*
 
 # typescript
 *.tsbuildinfo
