@@ -161,7 +161,19 @@ async function download(partPath) {
   const response = await jobRequest("/api/jobs/backup", 15 * 60_000);
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`/api/jobs/backup answered HTTP ${response.status}: ${detail.slice(0, 300)}`);
+    // A failing ERP answers with a whole HTML error page, which is no use in a
+    // log. Say what the status actually means for this setup instead.
+    const hint = {
+      404: "The ERP has no /api/jobs/backup route. Is a version with the backup code deployed?",
+      401: "ERP_JOB_SECRET does not match JOB_SECRET on the ERP.",
+      503: "JOB_SECRET is not configured on the ERP.",
+    }[response.status];
+    const body = /^\s*<(!doctype|html)/i.test(detail) ? "" : detail.trim().slice(0, 200);
+    throw new Error(
+      [`/api/jobs/backup answered HTTP ${response.status}.`, hint, body && `Response: ${body}`]
+        .filter(Boolean)
+        .join(" "),
+    );
   }
   if (!response.body) throw new Error("The ERP returned no body for the archive.");
   await pipeline(Readable.fromWeb(response.body), createWriteStream(partPath));
